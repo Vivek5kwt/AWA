@@ -1,0 +1,13 @@
+{
+  "helloWorld": "नमस्ते",
+  "login": "लॉगिन करें",
+  "loginTo": "अपने अकाउंट में लॉग इन करें",
+  "darkMode": "डार्क मोड",
+  "Language": "भाषा",
+  "Logout": "लॉग आउट",
+  "deleteAccount": "खाता हटा दो",
+  "registerSpeaker": "वक्ता पंजीकृत करें",
+  "identifySpeaker": "वक्ता को पहचानें",
+  "chat": "बात करना",
+  "friendBook": "मित्र पुस्तक"
+}

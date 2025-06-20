@@ -1,0 +1,13 @@
+{
+  "helloWorld": "Hello",
+  "login": "Login",
+  "loginTo": "Login To Your Account",
+  "darkMode": "Dark Mode",
+  "language": "Language",
+  "logout": "Logout",
+  "deleteAccount": "Delete Account",
+  "registerSpeaker": "Register Speaker",
+  "identifySpeaker": "Identify Speaker",
+  "chat": "Chat",
+  "friendBook": "Friend Book"
+}

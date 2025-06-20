@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "420990955519",
+    "project_id": "awa-dev-501dc",
+    "storage_bucket": "awa-dev-501dc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:420990955519:android:c65ce0276daae0d507c1ca",
+        "android_client_info": {
+          "package_name": "com.example.awa"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "420990955519-r23co07hh5g1ks5otofksu26gjak1nnm.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.awa",
+            "certificate_hash": "4b1ac358233c089dffef8fcd9adbcd995416b002"
+          }
+        },
+        {
+          "client_id": "420990955519-hg0hb8itfh114l296v17q68n4r32bh1p.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZ4BI3XeDOIsuKN8tSf46YwWShBhThg94"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "420990955519-hg0hb8itfh114l296v17q68n4r32bh1p.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
