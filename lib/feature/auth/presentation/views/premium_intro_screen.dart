@@ -1,13 +1,19 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import '../../../../core/network/http_service.dart';
 
 class PremiumIntroScreen extends StatefulWidget {
-  final VoidCallback onContinue;
+  final VoidCallback onLater;
+  final void Function(Map<String, dynamic> plan) onContinue;
   final String logoAsset;
 
   const PremiumIntroScreen({
     super.key,
     required this.onContinue,
+    required this.onLater,
     this.logoAsset = 'assets/images/awa_logo.webp',
   });
 
@@ -18,7 +24,12 @@ class PremiumIntroScreen extends StatefulWidget {
 class _PremiumIntroScreenState extends State<PremiumIntroScreen>
     with SingleTickerProviderStateMixin {
   bool _freeTrialEnabled = true;
-  bool _yearlySelected = true;
+
+  // Dynamic plans
+  List<Map<String, dynamic>> _plans = [];
+  Map<String, dynamic>? _selectedPlan;
+  bool _isLoading = true;
+  String? _error;
 
   late AnimationController _glowController;
   late Animation<double> _glowAnim;
@@ -33,12 +44,46 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
     _glowAnim = Tween<double>(begin: 0.5, end: 1).animate(
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
     );
+    _fetchPlans();
   }
 
   @override
   void dispose() {
     _glowController.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchPlans() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final url = Uri.parse(ApiConstants.getSubPlan);
+      final resp = await http.get(url);
+      if (resp.statusCode == 200) {
+        final decoded = jsonDecode(resp.body);
+        final plans = (decoded['plans'] as List)
+            .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+            .toList();
+
+        setState(() {
+          _plans = plans;
+          _selectedPlan = plans.isNotEmpty ? plans.first : null;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = 'Failed to load plans.';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load plans.';
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -158,7 +203,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                           ),
                           const SizedBox(height: 22),
                           _buildFeature(Icons.lock_open_rounded, "Unlimited content access"),
-                        //  _buildFeature(Icons.offline_pin_rounded, "Offline access"),
                           _buildFeature(Icons.no_adult_content, "No annoying ads"),
                           const SizedBox(height: 22),
                           // Free trial toggle
@@ -188,27 +232,8 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                           ),
                           const SizedBox(height: 15),
                           // Plan picker
-                          Row(
-                            children: [
-                              _buildPlanTile(
-                                selected: _yearlySelected,
-                                label: "Yearly",
-                                price: "₹599/year",
-                                subtitle: "Save 50%",
-                                onTap: () => setState(() => _yearlySelected = true),
-                              ),
-                              const SizedBox(width: 10),
-                              _buildPlanTile(
-                                selected: !_yearlySelected,
-                                label: "Monthly",
-                                price: "₹99/mo",
-                                subtitle: null,
-                                onTap: () => setState(() => _yearlySelected = false),
-                              ),
-                            ],
-                          ),
+                          _buildPlansSection(),
                           const SizedBox(height: 13),
-                          // Info
                           Text(
                             "No charges yet. Cancel anytime.",
                             style: TextStyle(
@@ -230,10 +255,9 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                                 padding: const EdgeInsets.symmetric(vertical: 14),
                                 elevation: 8,
                               ),
-                              onPressed: () {
-                                // You can trigger payment flow here.
-                                widget.onContinue();
-                              },
+                              onPressed: _selectedPlan != null && !_isLoading
+                                  ? () => widget.onContinue(_selectedPlan!)
+                                  : null,
                               child: const Text(
                                 "Continue",
                                 style: TextStyle(
@@ -245,32 +269,37 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                               ),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          // Links
-                         /* Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              TextButton(
-                                onPressed: () {}, // Restore purchase
-                                child: const Text("Restore Purchase"),
+                          const SizedBox(height: 10),
+                          // Maybe Later Button
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: Colors.amber.shade300, width: 1.3),
+                                foregroundColor: Colors.amber[800],
+                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
                               ),
-                              TextButton(
-                                onPressed: () {}, // Privacy
-                                child: const Text("Privacy Policy"),
+                              icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18),
+                              label: const Text(
+                                "Maybe Later",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16.4,
+                                ),
                               ),
-                              TextButton(
-                                onPressed: () {}, // Terms
-                                child: const Text("Terms of Use"),
-                              ),
-                            ],
-                          )*/
+                              onPressed: widget.onLater,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 28),
                     // How Free Trial Works
                     _HowTrialWorksPanel(
-                      isYearly: _yearlySelected,
+                      isYearly: _selectedPlan?['plan_name']?.toLowerCase().contains('year') ?? false,
                     ),
                   ],
                 ),
@@ -300,85 +329,125 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
     ),
   );
 
-  Widget _buildPlanTile({
-    required bool selected,
-    required String label,
-    required String price,
-    String? subtitle,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 320),
-          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 0),
-          margin: EdgeInsets.only(
-            top: selected ? 0 : 4,
-            bottom: selected ? 0 : 4,
-          ),
-          decoration: BoxDecoration(
-            color: selected ? Colors.amber[700] : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: selected
-                ? [
-              BoxShadow(
-                color: Colors.amber.withOpacity(0.22),
-                blurRadius: 16,
-                offset: const Offset(0, 3),
-              )
-            ]
-                : [],
-            border: Border.all(
-              color: selected ? Colors.amber[300]! : Colors.white24,
-              width: selected ? 2 : 1,
+  Widget _buildPlansSection() {
+    if (_isLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 22),
+        child: Center(child: CircularProgressIndicator(color: Colors.amber)),
+      );
+    }
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 22),
+        child: Column(
+          children: [
+            Text(
+              _error!,
+              style: TextStyle(color: Colors.redAccent, fontSize: 15),
             ),
-          ),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? Colors.white : Colors.white70,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 17,
-                  letterSpacing: 0.6,
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _fetchPlans,
+              icon: const Icon(Icons.refresh, color: Colors.amber),
+              label: const Text("Retry", style: TextStyle(color: Colors.amber)),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_plans.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        child: Text("No subscription plans available.",
+            style: TextStyle(color: Colors.white70, fontSize: 16)),
+      );
+    }
+    return Row(
+      children: _plans.map((plan) {
+        final isSelected = plan == _selectedPlan;
+        final planLabel = plan['plan_name'] ?? 'Plan';
+        final price = plan['price'] != null
+            ? '₹${(plan['price'] as num).toStringAsFixed(0)}'
+            : '₹---';
+        final subtitle = plan['subtitle'] ?? (plan['duration_days'] != null
+            ? "${plan['duration_days']} days"
+            : null);
+        return Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() => _selectedPlan = plan),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 320),
+              padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 0),
+              margin: EdgeInsets.only(
+                right: _plans.last == plan ? 0 : 10,
+                top: isSelected ? 0 : 4,
+                bottom: isSelected ? 0 : 4,
+              ),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.amber[700] : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: isSelected
+                    ? [
+                  BoxShadow(
+                    color: Colors.amber.withOpacity(0.22),
+                    blurRadius: 16,
+                    offset: const Offset(0, 3),
+                  )
+                ]
+                    : [],
+                border: Border.all(
+                  color: isSelected ? Colors.amber[300]! : Colors.white24,
+                  width: isSelected ? 2 : 1,
                 ),
               ),
-              const SizedBox(height: 5),
-              Text(
-                price,
-                style: TextStyle(
-                  color: selected ? Colors.white : Colors.white70,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15.6,
-                ),
-              ),
-              if (subtitle != null)
-                Container(
-                  margin: const EdgeInsets.only(top: 4),
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.withOpacity(0.20),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12.2,
-                      fontWeight: FontWeight.w600,
+              child: Column(
+                children: [
+                  Text(
+                    planLabel,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.white70,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                      letterSpacing: 0.6,
                     ),
                   ),
-                ),
-            ],
+                  const SizedBox(height: 5),
+                  Text(
+                    price,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : Colors.white70,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15.6,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.withOpacity(0.20),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12.2,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      }).toList(),
     );
   }
 }
 
+// How Free Trial Works panel
 class _HowTrialWorksPanel extends StatelessWidget {
   final bool isYearly;
   const _HowTrialWorksPanel({required this.isYearly});
@@ -430,7 +499,6 @@ class _HowTrialWorksPanel extends StatelessWidget {
             highlight: highlight,
           ),
           const SizedBox(height: 15),
-
         ],
       ),
     );

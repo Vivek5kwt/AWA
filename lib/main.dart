@@ -57,6 +57,7 @@ class MyApp extends StatefulWidget {
   @override
   State<MyApp> createState() => _MyAppState();
 
+  /// Call this anywhere with: MyApp.setLocale(context, Locale('hi'));
   static void setLocale(BuildContext context, Locale newLocale) {
     final _MyAppState? state = context.findAncestorStateOfType<_MyAppState>();
     state?.setLocale(newLocale);
@@ -89,9 +90,15 @@ class _MyAppState extends State<MyApp> {
         locale: _locale,
         supportedLocales: const [
           Locale('en'),
-          Locale('es'),
           Locale('hi'),
+          Locale('pa'),
+          Locale('gu'),
+          Locale('ta'),
+          Locale('mr'),
+          Locale('bn'),
+          Locale('ur'),
         ],
+
         localizationsDelegates: const [
           AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,

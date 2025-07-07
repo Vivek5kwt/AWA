@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
+import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as rec;
@@ -290,7 +291,7 @@ class _AddContactScreenState extends State<AddContactScreen>
 
                       // Title
                       Text(
-                        'Register New Contact',
+                        context.loc.registerSpeaker,
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -301,7 +302,7 @@ class _AddContactScreenState extends State<AddContactScreen>
 
                       // Subtitle
                       Text(
-                        'Enter a friendly name for this contact.\nThis helps identify them by voice.',
+                        context.loc.enterAFriendlyName,
                         style: TextStyle(
                           color: isDark ? Colors.white70 : Colors.black87,
                           fontSize: 14,
@@ -316,7 +317,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                         autofocus: true,
                         textInputAction: TextInputAction.done,
                         decoration: InputDecoration(
-                          hintText: 'e.g. Vivek Sharma',
+                          hintText: context.loc.hintName,
                           hintStyle: TextStyle(
                             color: isDark ? Colors.white38 : Colors.grey[500],
                           ),
@@ -350,7 +351,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.check_circle, size: 20),
-                          label: const Text('Save & Continue'),
+                          label:  Text(context.loc.saveContinue),
                           style: ElevatedButton.styleFrom(
                             foregroundColor: Theme.of(context).colorScheme.onPrimary,
                             backgroundColor: Theme.of(context).primaryColor,
@@ -460,7 +461,7 @@ class _AddContactScreenState extends State<AddContactScreen>
           _revealWords();
         } else {
           _showSnackbar(
-            "${_nameController!.text.trim()} added successfully!",
+            "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
             Colors.greenAccent,
           );
           await Future.delayed(const Duration(milliseconds: 800));
@@ -554,7 +555,7 @@ class _AddContactScreenState extends State<AddContactScreen>
               ),
               const SizedBox(height: 12),
               Text(
-                "You're on question ${_currentIndex + 1} of ${_sentences.length}",
+                "${context.loc.youAreOnQuestion} ${_currentIndex + 1} ${context.loc.of_text} ${_sentences.length}",
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.88),
                   fontWeight: FontWeight.w500,
@@ -629,8 +630,8 @@ class _AddContactScreenState extends State<AddContactScreen>
                                   end: Alignment.bottomCenter,
                                 ).createShader(bounds);
                               },
-                              child: const Text(
-                                "Voice Matched!",
+                              child:  Text(
+                                context.loc.voiceMatched,
                                 style: TextStyle(
                                     fontSize: 22,
                                     fontWeight: FontWeight.bold,
@@ -732,21 +733,22 @@ class _AddContactScreenState extends State<AddContactScreen>
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 14, top: 8),
-                child: Text(
+                child:Text(
                   _isRecording
-                      ? 'Recording... Speak the sentence clearly.'
-                      : 'Tap mic to record your answer',
+                      ? context.loc.recordingSpeakClearly
+                      : context.loc.tapMicToRecord,
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.83),
                     fontSize: 16,
                   ),
-                ),
+                )
+
               ),
               if (_showTryAgain)
-                const Padding(
+                 Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text(
-                    'Voice not clear or not detected. Please try again.',
+                    context.loc.voiceNotClear,
                     style: TextStyle(color: Colors.redAccent),
                   ),
                 ),

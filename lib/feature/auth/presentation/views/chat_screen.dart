@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
@@ -10,15 +11,17 @@ import 'package:flutter/scheduler.dart';
 import '../../../../core/network/http_service.dart';
 
 class ChatScreen extends StatefulWidget {
-  final String name;           // Friend's name (for app bar)
-  final String phoneNumber;    // Friend's phone number
-  final String id;             // Friend's email (ALWAYS friend's email)
+  final String name;
+  final String phoneNumber;
+  final String id;
+  final bool isDarkMode;
 
   const ChatScreen({
     Key? key,
     required this.name,
     required this.phoneNumber,
     required this.id,
+    this.isDarkMode = false,
   }) : super(key: key);
 
   @override
@@ -48,7 +51,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final prefs = await SharedPreferences.getInstance();
     _userEmail = prefs.getString('email') ?? '';
     if (_userEmail == null || _userEmail!.isEmpty) {
-      // handle user not logged in
       if (mounted) Navigator.of(context).pop();
       return;
     }
@@ -156,14 +158,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final chatGradient = const [
-      Color(0xFF7F7FD5),
-      Color(0xFF86A8E7),
-      Color(0xFF91EAE4),
-    ];
+    final chatGradient = widget.isDarkMode
+        ? [const Color(0xFF232526), const Color(0xFF414345)]
+        : [const Color(0xFF7F7FD5), const Color(0xFF86A8E7), const Color(0xFF91EAE4)];
+    final backgroundColor = widget.isDarkMode ? const Color(0xFF232526) : Colors.white;
+    final textColor = widget.isDarkMode ? Colors.white : const Color(0xFF35394B);
+    final hintTextColor = widget.isDarkMode ? Colors.white60 : Colors.black45;
+    final bubbleColorMe = widget.isDarkMode ? const Color(0xFF3D8BE9) : const Color(0xFF5B86E5);
+    final bubbleColorOther = widget.isDarkMode
+        ? Colors.white.withOpacity(0.08)
+        : Colors.white.withOpacity(0.92);
+    final myIconColor = widget.isDarkMode ? Colors.white : Colors.black;
+    final shadowColor = widget.isDarkMode ? Colors.black26 : Colors.black.withOpacity(0.09);
 
     return Scaffold(
       extendBodyBehindAppBar: true,
+      backgroundColor: backgroundColor,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(75),
         child: SafeArea(
@@ -176,7 +186,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.09),
+                  color: shadowColor,
                   blurRadius: 12,
                   offset: const Offset(0, 8),
                 ),
@@ -186,7 +196,7 @@ class _ChatScreenState extends State<ChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+                  icon: Icon(Icons.arrow_back, color: myIconColor, size: 28),
                   onPressed: () {
                     context.pop();
                   },
@@ -194,10 +204,23 @@ class _ChatScreenState extends State<ChatScreen> {
                 const SizedBox(width: 12),
                 CircleAvatar(
                   radius: 22,
-                  backgroundColor: const Color(0xFF38f9d7),
+                  backgroundColor: widget.isDarkMode
+                      ? const Color(0xFF1F6E8C)
+                      : const Color(0xFF38f9d7),
                   child: Text(
                     widget.name.isNotEmpty ? widget.name[0].toUpperCase() : '?',
-                    style: const TextStyle(color: Colors.white, fontSize: 20),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      shadows: [
+                        Shadow(
+                          color: Colors.black26,
+                          blurRadius: 6,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 13),
@@ -208,10 +231,17 @@ class _ChatScreenState extends State<ChatScreen> {
                     children: [
                       Text(
                         widget.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                           fontSize: 18,
+                          letterSpacing: 0.2,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black12,
+                              blurRadius: 4,
+                            ),
+                          ],
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -223,7 +253,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         builder: (context, snapshot) {
                           final typing = snapshot.data ?? false;
                           return Text(
-                            typing ? 'Typing...' : 'Online',
+                            typing ? context.loc.typing : context.loc.online,
                             style: TextStyle(
                               color: Colors.white.withOpacity(0.75),
                               fontSize: 14,
@@ -236,7 +266,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.videocam_rounded, color: Colors.white, size: 29),
+                  icon: Icon(Icons.videocam_rounded, color: myIconColor, size: 29),
                   onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Video call is under development')),
                   ),
@@ -267,8 +297,12 @@ class _ChatScreenState extends State<ChatScreen> {
                       .snapshots(),
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: CircularProgressIndicator(color: Colors.white),
+                      return Center(
+                        child: CircularProgressIndicator(
+                          color: widget.isDarkMode
+                              ? Colors.white
+                              : Colors.blueAccent,
+                        ),
                       );
                     }
                     final docs = snapshot.data?.docs ?? [];
@@ -279,13 +313,17 @@ class _ChatScreenState extends State<ChatScreen> {
                           children: [
                             Icon(Icons.forum_rounded,
                                 size: 70,
-                                color: Colors.white.withOpacity(0.3)),
+                                color: widget.isDarkMode
+                                    ? Colors.white12
+                                    : Colors.white.withOpacity(0.3)),
                             const SizedBox(height: 18),
                             Text(
-                              'No messages yet.\nStart the conversation!',
+                              '${context.loc.noMsgYet}\n${context.loc.startTheConversation}',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                  color: Colors.white.withOpacity(0.8),
+                                  color: widget.isDarkMode
+                                      ? Colors.white54
+                                      : Colors.white.withOpacity(0.8),
                                   fontSize: 17,
                                   fontWeight: FontWeight.w600),
                             ),
@@ -305,6 +343,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           text: data['text'] ?? '',
                           timestamp: (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
                           isMe: isMe,
+                          isDarkMode: widget.isDarkMode,
                         );
                       },
                     );
@@ -315,11 +354,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.12),
+                    color: widget.isDarkMode
+                        ? Colors.white10
+                        : Colors.white.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(30),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.06),
+                        color: shadowColor,
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -330,11 +371,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       Expanded(
                         child: TextField(
                           controller: _inputController,
-                          style: const TextStyle(color: Colors.white, fontSize: 16),
+                          style: TextStyle(color: textColor, fontSize: 16),
                           decoration: InputDecoration(
-                            hintText: 'Type a message...',
-                            hintStyle: TextStyle(
-                                color: Colors.white70.withOpacity(0.9)),
+                            hintText: context.loc.typeAMsg,
+                            hintStyle: TextStyle(color: hintTextColor),
                             border: InputBorder.none,
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 18, vertical: 16),
@@ -342,10 +382,17 @@ class _ChatScreenState extends State<ChatScreen> {
                           textCapitalization: TextCapitalization.sentences,
                           onChanged: _onTextChanged,
                           onSubmitted: (_) => _handleSend(),
+                          cursorColor: widget.isDarkMode
+                              ? Colors.lightBlueAccent
+                              : Colors.blueAccent,
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.send_rounded, color: Colors.white, size: 26),
+                        icon: Icon(Icons.send_rounded,
+                            color: widget.isDarkMode
+                                ? Colors.blueAccent.shade100
+                                : Colors.white,
+                            size: 26),
                         onPressed: _handleSend,
                         splashRadius: 27,
                       ),
@@ -365,18 +412,29 @@ class _ChatBubble extends StatelessWidget {
   final String text;
   final DateTime timestamp;
   final bool isMe;
+  final bool isDarkMode;
 
   const _ChatBubble({
     Key? key,
     required this.text,
     required this.timestamp,
     this.isMe = false,
+    this.isDarkMode = false,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final myColor = const Color(0xFF5B86E5);
-    final otherColor = Colors.white.withOpacity(0.92);
+    final myColor = isDarkMode ? const Color(0xFF1565C0) : const Color(0xFF5B86E5);
+    final otherColor = isDarkMode
+        ? Colors.white.withOpacity(0.08)
+        : Colors.white.withOpacity(0.92);
+    final textColor = isMe
+        ? Colors.white
+        : (isDarkMode ? Colors.white70 : const Color(0xFF35394B));
+    final timeColor = (isMe
+        ? Colors.white
+        : (isDarkMode ? Colors.white70 : const Color(0xFF35394B)))
+        .withOpacity(0.57);
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -395,7 +453,9 @@ class _ChatBubble extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.10),
+              color: isDarkMode
+                  ? Colors.black.withOpacity(0.14)
+                  : Colors.black.withOpacity(0.10),
               blurRadius: 9,
               offset: const Offset(1, 3),
             ),
@@ -408,7 +468,7 @@ class _ChatBubble extends StatelessWidget {
             Text(
               text,
               style: TextStyle(
-                color: isMe ? Colors.white : const Color(0xFF35394B),
+                color: textColor,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
               ),
@@ -422,8 +482,7 @@ class _ChatBubble extends StatelessWidget {
                 Text(
                   DateFormat('h:mm a').format(timestamp),
                   style: TextStyle(
-                    color: (isMe ? Colors.white : const Color(0xFF35394B))
-                        .withOpacity(0.57),
+                    color: timeColor,
                     fontSize: 11.7,
                     fontWeight: FontWeight.w400,
                   ),
@@ -431,7 +490,10 @@ class _ChatBubble extends StatelessWidget {
                 if (isMe) ...[
                   const SizedBox(width: 4),
                   Icon(Icons.done_all_rounded,
-                      color: Colors.lightBlueAccent.shade100, size: 16),
+                      color: isDarkMode
+                          ? Colors.lightBlueAccent
+                          : Colors.lightBlueAccent.shade100,
+                      size: 16),
                 ],
               ],
             ),

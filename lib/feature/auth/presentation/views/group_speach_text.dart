@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
+import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:wave_blob/wave_blob.dart';
@@ -278,7 +279,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       stoppedPath = _currentFilePath;
     }
 
-    // Process the stopped file if exists
     if (stoppedPath != null) {
       final file = File(stoppedPath);
       if (await file.exists()) {
@@ -295,11 +295,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
   Future<int> _getWavDurationSeconds(File file) async {
-    // Basic PCM WAV header check (for mono/44100hz/16bit PCM, adjust as needed)
     try {
       final bytes = await file.readAsBytes();
       if (bytes.length < 44) return 0;
-      final byteRate = bytes.buffer.asByteData().getUint32(28, Endian.little); // bytes/sec
+      final byteRate = bytes.buffer.asByteData().getUint32(28, Endian.little);
       final dataLen = bytes.length - 44;
       if (byteRate > 0) return (dataLen ~/ byteRate).clamp(0, 1000);
     } catch (_) {}
@@ -648,7 +647,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "Messages",
+            context.loc.messages,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -757,8 +756,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                     children: [
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 300),
-                        width: _isRecording ? 16 : 8,
-                        height: _isRecording ? 16 : 8,
+                        width: _isRecording ? 12 : 8,
+                        height: _isRecording ? 12 : 8,
                         decoration: BoxDecoration(
                           color: _isRecording
                               ? Colors.redAccent
@@ -774,12 +773,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                           ],
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Text(
-                        _isRecording ? 'Listening...' : 'Tap mic to start/stop listening',
+                        _isRecording ? context.loc.listening : context.loc.tapMicToStart,
                         style: TextStyle(
                           color: textPrimary.withOpacity(0.86),
-                          fontSize: 20,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.2,
                           shadows: [
@@ -799,7 +798,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                       child: _messages.isEmpty
                           ? Center(
                         child: Text(
-                          'No conversation yet.\nStart a group talk!',
+                          context.loc.noConversationYet,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: textSecondary,
@@ -1050,7 +1049,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                                   ),
                                   decoration: InputDecoration(
                                     border: InputBorder.none,
-                                    hintText: "Type a message…",
+                                    hintText: context.loc.typeAMsg,
                                     hintStyle: TextStyle(
                                       color: widget.isDarkMode
                                           ? Colors.white54
@@ -1202,7 +1201,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                 : [Colors.deepPurple, Colors.indigo, Colors.amber],
           ).createShader(rect),
           child: Text(
-            'Chat History',
+            context.loc.chatHistory,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -1235,7 +1234,6 @@ class MeetingHistoryScreen extends StatelessWidget {
       ),
       body: Stack(
         children: [
-          // Gradient Background
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -1245,7 +1243,6 @@ class MeetingHistoryScreen extends StatelessWidget {
               ),
             ),
           ),
-          // Subtle white glass overlay (only on light)
           if (!isDark)
             BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
@@ -1253,7 +1250,6 @@ class MeetingHistoryScreen extends StatelessWidget {
                 color: Colors.white.withOpacity(0.08),
               ),
             ),
-          // Meeting List Content
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.only(top: 12),
@@ -1347,7 +1343,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                               : [Colors.deepPurple, Colors.indigo, Colors.amber],
                                         ).createShader(rect),
                                         child: Text(
-                                          data['title'] ?? 'Group Chat',
+                                          data['title'] ?? context.loc.groupChat,
                                           style: TextStyle(
                                             color: Colors.white,
                                             fontWeight: FontWeight.bold,
@@ -1392,7 +1388,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                                         : [Colors.deepPurple, Colors.amber],
                                                   ).createShader(rect),
                                                   child: Text(
-                                                    "Conversation",
+                                                    context.loc.conversation,
                                                     style: TextStyle(
                                                       color: Colors.white,
                                                       fontWeight: FontWeight.bold,

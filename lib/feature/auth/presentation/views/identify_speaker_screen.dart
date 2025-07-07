@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
@@ -337,14 +338,14 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
-          'Delete Speaker',
+          context.loc.deleteSpeaker,
           style: TextStyle(
             color: widget.isDarkMode ? Colors.white : Colors.black87,
             fontWeight: FontWeight.bold,
           ),
         ),
         content: Text(
-          'Are you sure you want to delete "${s.name}"?',
+          '${context.loc.areYouSure} ${s.name} ${context.loc.removeFromFriend}',
           style: TextStyle(
             color: widget.isDarkMode ? Colors.white70 : Colors.black54,
           ),
@@ -358,7 +359,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
             ),
             onPressed: () => context.pop(),
             child: Text(
-              'Cancel',
+              context.loc.cancel,
               style: TextStyle(
                 color: widget.isDarkMode ? Colors.white : Colors.black87,
               ),
@@ -374,8 +375,8 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
               context.pop();
               _deleteSpeaker(s);
             },
-            child: const Text(
-              'Delete',
+            child:  Text(
+              context.loc.delete,
               style: TextStyle(color: Colors.white),
             ),
           ),
@@ -420,7 +421,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "Registered Speaker",
+            context.loc.registerSpeaker,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -460,7 +461,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
         icon: Icon(Icons.person_add_alt_1_rounded,
             color: widget.isDarkMode ? Colors.black : Colors.white, size: 27),
         label: Text(
-          "Add Speaker",
+          context.loc.addSpeaker,
           style: TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w600,
@@ -529,7 +530,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                               backgroundColor: Colors.redAccent.withOpacity(0.09),
                               foregroundColor: Colors.redAccent,
                               icon: Icons.delete_outline_rounded,
-                              label: 'Delete',
+                              label: context.loc.delete,
                               spacing: 6,
                             ),
                           ],
@@ -646,8 +647,8 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                                                 ? Colors.cyanAccent
                                                 : Colors.deepPurpleAccent),
                                         const SizedBox(width: 5),
-                                        const Text(
-                                          "Voice Registered Only",
+                                         Text(
+                                          context.loc.voiceRegisteredOnly,
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
                                             fontSize: 12.5,
@@ -715,7 +716,7 @@ class _NoSpeakersWidget extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'No speakers registered yet!',
+            context.loc.noSpeakerRegister,
             style: TextStyle(
                 color: isDarkMode ? Colors.white70 : Colors.blueGrey.shade800,
                 fontWeight: FontWeight.bold,
@@ -723,7 +724,7 @@ class _NoSpeakersWidget extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           Text(
-            'Tap below to register a new speaker.',
+            context.loc.tapBelowToRegister,
             style: TextStyle(
               color: isDarkMode ? Colors.white38 : Colors.blueGrey.shade400,
               fontSize: 16,
@@ -741,7 +742,7 @@ class _NoSpeakersWidget extends StatelessWidget {
             icon: Icon(Icons.person_add_alt_1_rounded,
                 color: isDarkMode ? Colors.black : Colors.white, size: 26),
             label: Text(
-              "Register Speaker",
+              context.loc.registerSpeaker,
               style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w600,

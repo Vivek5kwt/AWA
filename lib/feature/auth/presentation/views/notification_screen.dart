@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
@@ -275,7 +276,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "Notifications",
+            context.loc.notifications,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -446,19 +447,11 @@ class _NoNotificationsWidget extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           Text(
-            'No notifications found!',
+            context.loc.noNotificationFound,
             style: TextStyle(
               color: isDarkMode ? Colors.white70 : Colors.blueGrey.shade800,
               fontWeight: FontWeight.bold,
               fontSize: 18.5,
-            ),
-          ),
-          const SizedBox(height: 7),
-          Text(
-            'You’re all caught up.',
-            style: TextStyle(
-              color: isDarkMode ? Colors.white38 : Colors.blueGrey.shade400,
-              fontSize: 16,
             ),
           ),
         ],

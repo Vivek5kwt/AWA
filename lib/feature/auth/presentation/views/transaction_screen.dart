@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -77,7 +78,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "My Transactions",
+            context.loc.myTransactions,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -49,15 +50,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
   bool _autoValidate = false;
   late AnimationController _animController;
 
-  final List<Map<String, dynamic>> _genders = [
-    {"label": "Male", "icon": Icons.male},
-    {"label": "Female", "icon": Icons.female},
-    {"label": "Other", "icon": Icons.transgender},
-  ];
-  final List<Map<String, dynamic>> _marital = [
-    {"label": "Single", "icon": Icons.person_outline},
-    {"label": "Married", "icon": Icons.favorite},
-  ];
+
 
   @override
   void initState() {
@@ -399,7 +392,15 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
     final isDark = widget.isDarkMode;
     final screenWidth = MediaQuery.of(context).size.width;
     final maxWidth = screenWidth < 540 ? screenWidth - 24 : 500.0;
-
+    final List<Map<String, dynamic>> _genders = [
+      {"label":context.loc.male, "icon": Icons.male},
+      {"label": context.loc.feMale, "icon": Icons.female},
+      {"label": context.loc.other, "icon": Icons.transgender},
+    ];
+    final List<Map<String, dynamic>> _marital = [
+      {"label": context.loc.single, "icon": Icons.person_outline},
+      {"label": context.loc.married, "icon": Icons.favorite},
+    ];
     return SafeArea(
       child: Scaffold(
         body: Container(
@@ -490,7 +491,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                         ).createShader(rect),
                                         child: Text(
                                             widget.isUpdate
-                                                ? "Update Your Profile"
+                                                ? context.loc.updateYourProfile
                                                 : AppStrings.completeProfileTitle,
                                           style: TextStyle(
                                             color: Colors.white,
@@ -666,7 +667,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                         fontWeight: FontWeight.w500,
                                       ),
                                       decoration: _inputDecoration(
-                                        hint: 'Full Name',
+                                        hint: context.loc.fullName,
                                         icon: Icons.person,
                                       ),
                                       validator: (v) => v!.trim().isEmpty
@@ -681,7 +682,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                           fontWeight: FontWeight.w500),
                                       keyboardType: TextInputType.number,
                                       decoration: _inputDecoration(
-                                          hint: 'Age', icon: Icons.cake),
+                                          hint: context.loc.age, icon: Icons.cake),
                                       validator: (v) {
                                         final a = int.tryParse(v ?? '');
                                         if (a == null || a < 1 || a > 120) {
@@ -692,7 +693,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                     ),
                                     const SizedBox(height: 16),
                                     _PillDropdown(
-                                      label: "Gender",
+                                      label: context.loc.gender,
                                       items: _genders,
                                       icon: Icons.wc,
                                       value: _genders.any((t) => t['label'] == _gender)
@@ -707,7 +708,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                     ),
                                     const SizedBox(height: 16),
                                     _PillDropdown(
-                                      label: "Marital Status",
+                                      label: context.loc.maritalStatus,
                                       items: _marital,
                                       icon: Icons.favorite_border,
                                       value: _marital.any((t) => t['label'] == _married)
@@ -796,7 +797,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                           )
                                               : Text(
                                             widget.isUpdate
-                                                ? 'Update Profile'
+                                                ? context.loc.updateProfile
                                                 : 'Complete Profile',
                                             style: GoogleFonts.poppins(
                                                 color: isDark ? Colors.black : Colors.white,

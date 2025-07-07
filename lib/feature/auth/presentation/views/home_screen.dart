@@ -16,6 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
 
 import '../../../../core/network/http_service.dart';
+import '../../../../main.dart';
+import '../../../common_widgets/custom_drop_down.dart';
 
 class HomeScreen extends StatefulWidget {
   final String phoneNumber;
@@ -55,14 +57,22 @@ class WaveClipper extends CustomClipper<Path> {
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isDarkMode = false;
   String _selectedLanguage = 'English';
-  final List<String> _languages = ['English', 'Hindi', 'Spanish'];
+  final List<String> _languages = [
+    'English',
+    'Hindi',
+    'Punjabi',
+    'Gujarati',
+    'Tamil',
+    'Marathi',
+    'Bengali',
+    'Urdu'
+  ];
   String _userName = 'User';
   String _mobileNumber = '';
   String _email = '';
   String _profilePic = '';
   String _loginType = '';
   late List<bool> _itemVisible;
-  bool _isImageDialogOpen = false;
   final ImagePicker _picker = ImagePicker();
   XFile? _pickedImage;
   late final PageController _carouselController;
@@ -107,6 +117,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _checkFirstLaunch();
     final menuButtonsCount = 6;
     _itemVisible = List<bool>.filled(3 + menuButtonsCount, false);
     _loadSettings().then((_) async {
@@ -142,8 +153,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       CurvedAnimation(parent: _supportAnimController, curve: Curves.easeInOut),
     );
 
-    _checkFirstLaunch();
-
     _razorpay = Razorpay();
     _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
     _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
@@ -159,6 +168,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _supportAnimController.dispose();
     super.dispose();
   }
+
   void _showPremiumDialog(BuildContext context, String title, String? message) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
@@ -200,9 +210,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     "This feature is for Premium users only.\nUpgrade to continue.",
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: isDark
-                      ? Colors.white.withOpacity(0.85)
-                      : Colors.black87,
+                  color:
+                      isDark ? Colors.white.withOpacity(0.85) : Colors.black87,
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
@@ -219,7 +228,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 icon: Icon(Icons.workspace_premium,
                     color: Colors.white, size: 20),
                 label: Text(
-                  "Go Premium",
+                  context.loc.goPremium,
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
                 ),
                 onPressed: () {
@@ -238,7 +247,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _trialLoading = true);
     try {
       final url =
-          Uri.parse('http://192.168.1.6:8000/check_trial?email=$_email');
+          Uri.parse('${ApiConstants.baseUrl}/check_trial?email=$_email');
       final resp = await http.get(url);
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
@@ -308,7 +317,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         if (mounted) {
           setState(() => _isSubscribed = subscribed);
           if (showSnackBar && subscribed) {
-            // Show creative premium SnackBar
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 elevation: 10,
@@ -378,6 +386,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() {
       _isDarkMode = prefs.getBool('darkMode') ?? false;
       _selectedLanguage = prefs.getString('language') ?? 'English';
+      if (!_languages.contains(_selectedLanguage)) {
+        _selectedLanguage = 'English';
+      }
       _userName = prefs.getString('name') ?? 'User';
       _email = prefs.getString('email') ?? '';
       _mobileNumber = prefs.getString('phoneNumber') ?? '';
@@ -385,6 +396,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _loginType = prefs.getString('login_type') ?? '';
     });
   }
+
 
   void _runItemAnimation() {
     for (var i = 0; i < _itemVisible.length; i++) {
@@ -402,9 +414,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _changeLanguage(String? lang) async {
     if (lang == null) return;
+    String langCode;
+    switch (lang) {
+      case 'Hindi':
+        langCode = 'hi';
+        break;
+      case 'Punjabi':
+        langCode = 'pa';
+        break;
+      case 'Gujarati':
+        langCode = 'gu';
+        break;
+      case 'Tamil':
+        langCode = 'ta';
+        break;
+      case 'Marathi':
+        langCode = 'mr';
+        break;
+      case 'Bengali':
+        langCode = 'bn';
+        break;
+      case 'Urdu':
+        langCode = 'ur';
+        break;
+      default:
+        langCode = 'en';
+    }
+    print('geteteteetetetet $lang');
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('language', lang);
+
     setState(() => _selectedLanguage = lang);
+
+    MyApp.setLocale(context, Locale(langCode));
   }
 
   Future<void> _pickImage() async {
@@ -438,7 +480,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(width: 8),
             Text(
-              'Logout',
+              context.loc.logout,
               style: TextStyle(
                 color: _isDarkMode ? Colors.white : Colors.black,
                 fontWeight: FontWeight.bold,
@@ -447,7 +489,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
         content: Text(
-          'Are you sure you want to logout?',
+          context.loc.areYourSureYouWantLogout,
           style: TextStyle(
             color: _isDarkMode ? Colors.white70 : Colors.black87,
           ),
@@ -456,7 +498,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(
-              'Cancel',
+              context.loc.cancel,
               style: TextStyle(
                 color: _isDarkMode ? Colors.white : Colors.black,
               ),
@@ -465,7 +507,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              'Logout',
+              context.loc.logout,
               style: TextStyle(
                 color: _isDarkMode ? Colors.white : Colors.redAccent,
                 fontWeight: FontWeight.bold,
@@ -535,7 +577,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Icon(Icons.delete_forever, color: Colors.redAccent),
             const SizedBox(width: 8),
             Text(
-              'Delete Account',
+              context.loc.delete,
               style: TextStyle(
                 color: _isDarkMode ? Colors.white : Colors.black,
                 fontWeight: FontWeight.bold,
@@ -544,7 +586,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ],
         ),
         content: Text(
-          'This will permanently delete your account and all data. Continue?',
+          context.loc.thisWillPermanently,
           style: TextStyle(
             color: _isDarkMode ? Colors.white70 : Colors.black87,
           ),
@@ -553,7 +595,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(
-              'Cancel',
+              context.loc.cancel,
               style: TextStyle(
                 color: _isDarkMode ? Colors.white : Colors.black,
               ),
@@ -562,7 +604,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(
-              'Delete',
+              context.loc.delete,
               style: TextStyle(
                 color: Colors.redAccent,
                 fontWeight: FontWeight.bold,
@@ -623,9 +665,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await prefs.setBool('isSubscribed', true);
     setState(() => _isSubscribed = true);
     await _checkAndUpdateSubscription(showSnackBar: true);
-
-    if (mounted) Navigator.of(context).pop();
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -938,7 +977,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final amount = (plan['price'] as num).toInt();
     final planName = plan['plan_name'] ?? '';
     final durationDays = plan['duration_days'].toString();
-    print('djsdjsj $amount');
     final order = await _createOrderOnBackend(amount);
     if (order == null || order['order_id'] == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -958,8 +996,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       "days": durationDays,
     }).toString();
 
-    print('Payment URL: $paymentUrl');
-
     await showDialog(
       context: context,
       builder: (_) => Dialog(
@@ -971,7 +1007,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             initialUrlRequest: URLRequest(url: WebUri(paymentUrl)),
             onLoadStop: (controller, url) async {
               if (url != null && url.toString().contains("/payment_success")) {
-                Navigator.of(context).pop();
                 final params = Uri.parse(url.toString()).queryParameters;
                 final verifyBody = {
                   "razorpay_order_id": orderId,
@@ -985,7 +1020,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                 final isVerified = await _verifyPaymentWithBackend(verifyBody);
                 if (isVerified) {
+                  setState(() {
+                    _isSubscribed = true;
+                  });
                   await _checkAndUpdateSubscription(showSnackBar: true);
+                  Navigator.of(context).pop();
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text('Payment verification failed!'),
@@ -1009,10 +1048,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final buttons = [
       {
         'icon': Icons.person_add,
-        'label': 'Register Speaker',
+        'label': context.loc.registerSpeaker,
         'key': _registerSpeakerKey,
         'desc': "Register a new speaker to begin speech identification.",
-        'onTap': _trialSkip||_trialExists
+        'onTap': _trialSkip || _trialExists
             ? () => context.pushNamed(
                   'addContact',
                   extra: {
@@ -1022,14 +1061,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   },
                 )
             : null,
-        'lock':  _trialSkip?false:!_trialExists,
+        'lock': _trialSkip ? false : !_trialExists,
       },
       {
         'icon': Icons.book,
-        'label': 'Speaker Book',
+        'label': context.loc.registerSpeaker,
         'key': _speakerBookKey,
         'desc': "Access your complete list of registered speakers.",
-        'onTap': _trialSkip||_trialExists
+        'onTap': _trialSkip || _trialExists
             ? () => context.pushNamed(
                   'speakerScreen',
                   extra: {
@@ -1038,11 +1077,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   },
                 )
             : null,
-        'lock': _trialSkip?false:!_trialExists,
+        'lock': _trialSkip ? false : !_trialExists,
       },
       {
         'icon': Icons.person_add_alt_1,
-        'label': 'Add Friends',
+        'label': context.loc.addFriends,
         'key': _addFriendsKey,
         'desc': "Add new friends and invite them to your network.",
         'onTap': () => context.goNamed(
@@ -1056,10 +1095,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       },
       {
         'icon': Icons.book,
-        'label': 'Friend Book',
+        'label': context.loc.friendBook,
         'key': _friendBookKey,
         'desc': "See your saved friends and manage your friend list.",
-        'onTap':_trialSkip|| _trialExists
+        'onTap': _trialSkip || _trialExists
             ? () => context.pushNamed(
                   'friendListScreen',
                   extra: {
@@ -1068,11 +1107,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   },
                 )
             : null,
-        'lock':  _trialSkip?false:!_trialExists,
+        'lock': _trialSkip ? false : !_trialExists,
       },
       {
         'icon': Icons.settings,
-        'label': 'Settings',
+        'label': context.loc.settings,
         'key': _settingsKey,
         'desc': "Configure your app preferences and settings here.",
         'onTap': () => context.pushNamed(
@@ -1082,7 +1121,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       },
       {
         'icon': Icons.edit,
-        'label': 'Update Profile',
+        'label': context.loc.updateProfile,
         'key': _updateProfileKey,
         'desc': "Update your personal information and profile picture.",
         'onTap': () async {
@@ -1199,15 +1238,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   gradient: LinearGradient(
                     colors: _isDarkMode
                         ? [
-                      Color(0xFF0F2027),
-                      Color(0xFF2C5364),
-                      Color(0xFF232526),
-                    ]
+                            Color(0xFF0F2027),
+                            Color(0xFF2C5364),
+                            Color(0xFF232526),
+                          ]
                         : [
-                      Color(0xFF0093E9),
-                      Color(0xFF80D0C7),
-                      Color(0xFFFCF6BA),
-                    ],
+                            Color(0xFF0093E9),
+                            Color(0xFF80D0C7),
+                            Color(0xFFFCF6BA),
+                          ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -1222,7 +1261,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ],
                 ),
                 child: ClipRRect(
-                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
+                  borderRadius:
+                      BorderRadius.vertical(bottom: Radius.circular(28)),
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                     child: AppBar(
@@ -1235,7 +1275,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         builder: (ctx) => IconButton(
                           icon: Icon(
                             Icons.menu,
-                            color: _isDarkMode ? Colors.cyanAccent : Colors.deepPurple,
+                            color: _isDarkMode
+                                 ? Colors.cyanAccent
+                                : Colors.deepPurple,
                             size: 28,
                           ),
                           onPressed: () => Scaffold.of(ctx).openDrawer(),
@@ -1275,20 +1317,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             shaderCallback: (bounds) => LinearGradient(
                               colors: _isDarkMode
                                   ? [
-                                Colors.cyanAccent,
-                                Colors.blueAccent,
-                                Colors.white,
-                              ]
+                                      Colors.cyanAccent,
+                                      Colors.blueAccent,
+                                      Colors.white,
+                                    ]
                                   : [
-                                Colors.deepPurple,
-                                Colors.indigo,
-                                Colors.amber,
-                              ],
+                                      Colors.deepPurple,
+                                      Colors.indigo,
+                                      Colors.amber,
+                                    ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ).createShader(bounds),
                             child: Text(
-                              'AWA',
+                              context.loc.awa,
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.w900,
@@ -1308,7 +1350,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             const SizedBox(width: 8),
                             AnimatedContainer(
                               duration: Duration(milliseconds: 900),
-                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   colors: [
@@ -1343,7 +1386,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       end: Alignment.bottomRight,
                                     ).createShader(bounds),
                                     child: Text(
-                                      "PREMIUM",
+                                      context.loc.premium,
                                       style: TextStyle(
                                         color: Colors.white,
                                         fontSize: 11,
@@ -1351,7 +1394,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                         letterSpacing: 1.1,
                                         shadows: [
                                           Shadow(
-                                            color: Colors.amberAccent.withOpacity(0.36),
+                                            color: Colors.amberAccent
+                                                .withOpacity(0.36),
                                             blurRadius: 5,
                                             offset: Offset(1, 1),
                                           ),
@@ -1371,7 +1415,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           child: IconButton(
                             icon: Icon(
                               Icons.notifications_none,
-                              color: _isDarkMode ? Colors.cyanAccent : Colors.deepPurple,
+                              color: _isDarkMode
+                                  ? Colors.cyanAccent
+                                  : Colors.deepPurple,
                               size: 27,
                             ),
                             onPressed: () {
@@ -1390,7 +1436,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
             ),
-
             drawer: Drawer(
               shape: const RoundedRectangleBorder(),
               child: buildDrawerContent(),
@@ -1476,7 +1521,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               },
                               blendMode: BlendMode.srcIn,
                               child: Text(
-                                "Go Premium",
+                                context.loc.goPremium,
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 18,
@@ -1514,23 +1559,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       decoration: BoxDecoration(
         gradient: _isDarkMode
             ? const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF181A20),
-            Color(0xFF232526),
-            Color(0xFF181A20),
-          ],
-        )
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF181A20),
+                  Color(0xFF232526),
+                  Color(0xFF181A20),
+                ],
+              )
             : const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF0093E9),
-            Color(0xFF80D0C7),
-            Color(0xFFFCF6BA),
-          ],
-        ),
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0093E9),
+                  Color(0xFF80D0C7),
+                  Color(0xFFFCF6BA),
+                ],
+              ),
       ),
       child: SafeArea(
         child: Column(
@@ -1599,7 +1644,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ),
                           ),
                           label: Text(
-                            "Go Premium",
+                            context.loc.goPremium,
                             style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                           onPressed: _showSubscriptionDialog,
@@ -1609,7 +1654,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1653,79 +1697,83 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   shape: BoxShape.circle,
                                   boxShadow: !_isDarkMode
                                       ? [
-                                    BoxShadow(
-                                      color: Colors.deepPurpleAccent
-                                          .withOpacity(0.13),
-                                      blurRadius: 14,
-                                      spreadRadius: 2,
-                                    ),
-                                  ]
+                                          BoxShadow(
+                                            color: Colors.deepPurpleAccent
+                                                .withOpacity(0.13),
+                                            blurRadius: 14,
+                                            spreadRadius: 2,
+                                          ),
+                                        ]
                                       : [],
                                 ),
                                 child: ClipOval(
                                   child: _pickedImage != null
                                       ? Image.file(
-                                    File(_pickedImage!.path),
-                                    fit: BoxFit.cover,
-                                  )
+                                          File(_pickedImage!.path),
+                                          fit: BoxFit.cover,
+                                        )
                                       : _profilePic.isNotEmpty
-                                      ? Image.network(
-                                    ApiConstants.baseUrl + _profilePic,
-                                    fit: BoxFit.cover,
-                                    loadingBuilder:
-                                        (context, child, progress) {
-                                      if (progress == null) return child;
-                                      return const Center(
-                                        child: CircularProgressIndicator(),
-                                      );
-                                    },
-                                    errorBuilder: (context, error, _) =>
-                                    const Icon(
-                                      Icons.error_outline,
-                                      color: Colors.white54,
-                                      size: 36,
-                                    ),
-                                  )
-                                      : Container(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                        colors: _isDarkMode
-                                            ? [
-                                          Colors.grey.shade800,
-                                          Colors.grey.shade700
-                                        ]
-                                            : [
-                                          Colors.blueAccent
-                                              .withOpacity(0.8),
-                                          Colors.lightBlueAccent
-                                        ],
-                                      ),
-                                    ),
-                                    child: Center(
-                                      child: Column(
-                                        mainAxisAlignment:
-                                        MainAxisAlignment.center,
-                                        children: [
-                                          Icon(
-                                            Icons.person_add_alt_1,
-                                            size: 32,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'Add Photo',
-                                            style: TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 10,
+                                          ? Image.network(
+                                              ApiConstants.baseUrl +
+                                                  _profilePic,
+                                              fit: BoxFit.cover,
+                                              loadingBuilder:
+                                                  (context, child, progress) {
+                                                if (progress == null)
+                                                  return child;
+                                                return const Center(
+                                                  child:
+                                                      CircularProgressIndicator(),
+                                                );
+                                              },
+                                              errorBuilder:
+                                                  (context, error, _) =>
+                                                      const Icon(
+                                                Icons.error_outline,
+                                                color: Colors.white54,
+                                                size: 36,
+                                              ),
+                                            )
+                                          : Container(
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                gradient: LinearGradient(
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  colors: _isDarkMode
+                                                      ? [
+                                                          Colors.grey.shade800,
+                                                          Colors.grey.shade700
+                                                        ]
+                                                      : [
+                                                          Colors.blueAccent
+                                                              .withOpacity(0.8),
+                                                          Colors.lightBlueAccent
+                                                        ],
+                                                ),
+                                              ),
+                                              child: Center(
+                                                child: Column(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.person_add_alt_1,
+                                                      size: 32,
+                                                      color: Colors.white,
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    Text(
+                                                      context.loc.addPhoto,
+                                                      style: TextStyle(
+                                                        color: Colors.white70,
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
                                 ),
                               ),
                             ),
@@ -1736,7 +1784,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             child: Text(
                               '${context.loc.helloWorld}, $_userName',
                               style: TextStyle(
-                                color: _isDarkMode ? Colors.white : Colors.black,
+                                color:
+                                    _isDarkMode ? Colors.white : Colors.black,
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1747,7 +1796,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             child: Text(
                               _loginType == '0' ? _email : _mobileNumber,
                               style: TextStyle(
-                                color: _isDarkMode ? Colors.white70 : Colors.black54,
+                                color: _isDarkMode
+                                    ? Colors.white70
+                                    : Colors.black54,
                                 fontSize: 14,
                               ),
                             ),
@@ -1759,17 +1810,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   Theme(
                     data: Theme.of(context).copyWith(
                       unselectedWidgetColor:
-                      _isDarkMode ? Colors.white : Colors.black,
+                          _isDarkMode ? Colors.white : Colors.black,
                       switchTheme: SwitchThemeData(
                         trackColor: MaterialStateProperty.resolveWith<Color>(
-                              (_) {
+                          (_) {
                             return _isDarkMode
                                 ? const Color(0xFF232526)
                                 : Colors.grey;
                           },
                         ),
                         thumbColor: MaterialStateProperty.resolveWith<Color>(
-                              (_) {
+                          (_) {
                             return _isDarkMode
                                 ? Colors.white
                                 : Colors.purpleAccent;
@@ -1793,42 +1844,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       activeColor: Theme.of(context).primaryColor,
                       inactiveThumbColor: Theme.of(context).primaryColor,
                       inactiveTrackColor:
-                      Theme.of(context).primaryColor.withOpacity(0.4),
+                          Theme.of(context).primaryColor.withOpacity(0.4),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    child: CustomLanguageDropdown(
+                      isDarkMode: _isDarkMode,
+                      selectedLanguage: _selectedLanguage,
+                      languages: _languages,
+                      text: context.loc.language,
+                      onChanged: (lang) => _changeLanguage(lang),
                     ),
                   ),
 
-                  /*ListTile(
-                    leading: Icon(Icons.language,
-                        color: _isDarkMode ? Colors.white : Colors.black),
-                    title: Text(
-                      context.loc.language,
-                      style: TextStyle(
-                          color: _isDarkMode ? Colors.white : Colors.black),
-                    ),
-                    trailing: DropdownButton<String>(
-                      value: _selectedLanguage,
-                      dropdownColor:
-                      _isDarkMode ? const Color(0xFF232526) : Colors.white,
-                      underline: const SizedBox(),
-                      icon: Icon(
-                        Icons.arrow_drop_down,
-                        color: _isDarkMode ? Colors.white : Colors.black,
-                      ),
-                      onChanged: _changeLanguage,
-                      items: _languages
-                          .map((lang) => DropdownMenuItem(
-                        value: lang,
-                        child: Text(lang,
-                            style: TextStyle(
-                                color: _isDarkMode
-                                    ? Colors.white
-                                    : Colors.black)),
-                      ))
-                          .toList(),
-                    ),
-                  ),*/
-                  Divider(
-                      color: _isDarkMode ? Colors.white24 : Colors.black26),
+                  Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
                   const SizedBox(height: 15),
                   Center(
                     child: ClipRRect(
@@ -1842,19 +1872,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                   const SizedBox(height: 15),
-                  Divider(
-                      color: _isDarkMode ? Colors.white24 : Colors.black26),
-// Logout
+                  Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
                   ListTile(
                     leading: Icon(Icons.exit_to_app,
                         color: _isDarkMode ? Colors.white : Colors.black),
                     title: Text(context.loc.logout,
                         style: TextStyle(
-                            color:
-                            _isDarkMode ? Colors.white : Colors.black)),
+                            color: _isDarkMode ? Colors.white : Colors.black)),
                     onTap: _logout,
                   ),
-// Delete Account
                   ListTile(
                     leading: const Icon(Icons.delete_forever,
                         color: Colors.redAccent),
@@ -1961,11 +1987,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   opacity: _itemVisible[1] ? 1 : 0,
                   child: AnimatedSlide(
                     duration: const Duration(milliseconds: 600),
-                    offset: _itemVisible[1] ? Offset.zero : const Offset(0, -0.12),
+                    offset:
+                        _itemVisible[1] ? Offset.zero : const Offset(0, -0.12),
                     child: Showcase(
                       key: _identifySpeakerKey,
                       title: "Identify Speaker",
-                      description: "Tap here to identify the speaker in real time.",
+                      description:
+                          "Tap here to identify the speaker in real time.",
                       descriptionPadding: EdgeInsets.all(6),
                       child: AnimatedBuilder(
                         animation: _glowAnim,
@@ -1974,83 +2002,80 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           final bool isDark = _isDarkMode;
 
                           final Color gradientStart =
-                          isDark ? Color(0xFF0ED2F7) : Color(0xFF0093E9);
+                              isDark ? Color(0xFF0ED2F7) : Color(0xFF0093E9);
                           final Color gradientEnd =
-                          isDark ? Color(0xFF29ECAC) : Color(0xFF80D0C7);
+                              isDark ? Color(0xFF29ECAC) : Color(0xFF80D0C7);
                           final Color borderColor = isDark
                               ? Colors.cyanAccent.withOpacity(0.90)
                               : Colors.deepPurpleAccent.withOpacity(0.55);
-                          final bool identifyLocked = !_trialSkip && !_trialExists;
+                          final bool identifyLocked =
+                              !_trialSkip && !_trialExists;
 
                           return GestureDetector(
                             onTap: identifyLocked
                                 ? () {
-                              showDialog(
-                                context: context,
-                                builder: (_) => AlertDialog(
-                                  backgroundColor: _isDarkMode
-                                      ? Colors.grey[900]
-                                      : Colors.white,
-                                  title: Row(
-                                    children: [
-                                      Icon(Icons.lock_outline,
-                                          color:
-                                          Colors.redAccent),
-                                      SizedBox(width: 8),
-                                      Text("Trial Ended",
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => AlertDialog(
+                                        backgroundColor: _isDarkMode
+                                            ? Colors.grey[900]
+                                            : Colors.white,
+                                        title: Row(
+                                          children: [
+                                            Icon(Icons.lock_outline,
+                                                color: Colors.redAccent),
+                                            SizedBox(width: 8),
+                                            Text("Trial Ended",
+                                                style: TextStyle(
+                                                  color: _isDarkMode
+                                                      ? Colors.white
+                                                      : Colors.redAccent,
+                                                  fontWeight: FontWeight.bold,
+                                                )),
+                                          ],
+                                        ),
+                                        content: Text(
+                                          _trialMessage ??
+                                              "Your free trial has expired. Please subscribe to continue using this feature.",
                                           style: TextStyle(
                                             color: _isDarkMode
-                                                ? Colors.white
-                                                : Colors
-                                                .redAccent,
-                                            fontWeight:
-                                            FontWeight.bold,
-                                          )),
-                                    ],
-                                  ),
-                                  content: Text(
-                                    _trialMessage ??
-                                        "Your free trial has expired. Please subscribe to continue using this feature.",
-                                    style: TextStyle(
-                                      color: _isDarkMode
-                                          ? Colors.white70
-                                          : Colors.black87,
-                                    ),
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.pop(context);
-                                        _showSubscriptionDialog();
-                                      },
-                                      child: Text(
-                                        "Upgrade Now",
-                                        style: TextStyle(
-                                          color:
-                                          Colors.amber[800],
-                                          fontWeight:
-                                          FontWeight.bold,
+                                                ? Colors.white70
+                                                : Colors.black87,
+                                          ),
                                         ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () {
+                                              Navigator.pop(context);
+                                              _showSubscriptionDialog();
+                                            },
+                                            child: Text(
+                                              "Upgrade Now",
+                                              style: TextStyle(
+                                                color: Colors.amber[800],
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
+                                    );
+                                  }
                                 : () => context.pushNamed(
-                              'identifySpeakerScreen',
-                              extra: {
-                                'isDarkMode': _isDarkMode,
-                                'phoneNumber': widget.phoneNumber,
-                              },
-                            ),
+                                      'identifySpeakerScreen',
+                                      extra: {
+                                        'isDarkMode': _isDarkMode,
+                                        'phoneNumber': widget.phoneNumber,
+                                      },
+                                    ),
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
                                 Container(
                                   width: double.infinity,
                                   height: 62,
-                                  margin: const EdgeInsets.symmetric(vertical: 8),
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 8),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(38),
                                     gradient: LinearGradient(
@@ -2059,22 +2084,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                             0.35 + _glowAnim.value * 0.19),
                                         gradientEnd.withOpacity(
                                             0.31 + _glowAnim.value * 0.13),
-                                        Colors.white.withOpacity(isDark ? 0.05 : 0.13),
+                                        Colors.white
+                                            .withOpacity(isDark ? 0.05 : 0.13),
                                       ],
                                       begin: Alignment.topLeft,
                                       end: Alignment.bottomRight,
                                     ),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: gradientEnd
-                                            .withOpacity(0.23 + _glowAnim.value * 0.18),
+                                        color: gradientEnd.withOpacity(
+                                            0.23 + _glowAnim.value * 0.18),
                                         blurRadius: 34 * _glowAnim.value + 8,
                                         spreadRadius: 3,
                                         offset: const Offset(0, 7),
                                       ),
                                       BoxShadow(
-                                        color: gradientStart
-                                            .withOpacity(0.09 + _glowAnim.value * 0.05),
+                                        color: gradientStart.withOpacity(
+                                            0.09 + _glowAnim.value * 0.05),
                                         blurRadius: 16,
                                         offset: const Offset(0, 2),
                                       ),
@@ -2086,7 +2112,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   duration: Duration(milliseconds: 600),
                                   width: double.infinity,
                                   height: 62,
-                                  margin: const EdgeInsets.symmetric(vertical: 8),
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 8),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(38),
                                     border: Border.all(
@@ -2106,7 +2133,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     ),
                                   ),
                                 ),
-                                // Content Row
                                 Center(
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -2118,10 +2144,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                             BoxShadow(
                                               color: isDark
                                                   ? Colors.cyanAccent
-                                                  .withOpacity(0.19 + _glowAnim.value * 0.08)
+                                                      .withOpacity(0.19 +
+                                                          _glowAnim.value *
+                                                              0.08)
                                                   : Colors.deepPurpleAccent
-                                                  .withOpacity(0.12 + _glowAnim.value * 0.07),
-                                              blurRadius: 18 + 9 * _glowAnim.value,
+                                                      .withOpacity(0.12 +
+                                                          _glowAnim.value *
+                                                              0.07),
+                                              blurRadius:
+                                                  18 + 9 * _glowAnim.value,
                                               offset: Offset(0, 2),
                                             ),
                                           ],
@@ -2134,15 +2165,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       ),
                                       const SizedBox(width: 15),
                                       Text(
-                                        "Identify Speaker",
-                                        style: theme.textTheme.titleLarge!.copyWith(
+                                        context.loc.identifySpeaker,
+                                        style: theme.textTheme.titleLarge!
+                                            .copyWith(
                                           color: theme.colorScheme.onPrimary,
                                           fontWeight: FontWeight.bold,
-                                          fontSize: 22,
+                                          fontSize: 18,
                                           letterSpacing: 1.12,
                                           shadows: [
                                             Shadow(
-                                              color: Colors.black.withOpacity(0.15),
+                                              color: Colors.black
+                                                  .withOpacity(0.15),
                                               blurRadius: 2,
                                               offset: const Offset(1, 1),
                                             )
@@ -2158,7 +2191,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                     ],
                                   ),
                                 ),
-                                // Lock overlay and shimmer when locked
                                 if (identifyLocked)
                                   Positioned.fill(
                                     child: Container(
@@ -2171,7 +2203,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       child: Stack(
                                         alignment: Alignment.center,
                                         children: [
-                                          // Shimmer lock icon
                                           TweenAnimationBuilder<double>(
                                             tween: Tween(begin: 0.6, end: 1.0),
                                             duration: Duration(seconds: 2),
@@ -2181,8 +2212,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                                 shaderCallback: (rect) {
                                                   return LinearGradient(
                                                     colors: [
-                                                      Colors.amber.withOpacity(val),
-                                                      Colors.orange.withOpacity(val * 0.8),
+                                                      Colors.amber
+                                                          .withOpacity(val),
+                                                      Colors.orange.withOpacity(
+                                                          val * 0.8),
                                                     ],
                                                     begin: Alignment.topLeft,
                                                     end: Alignment.bottomRight,
@@ -2190,13 +2223,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                                 },
                                                 child: Icon(Icons.lock_rounded,
                                                     size: 44 + 9 * (1 - val),
-                                                    color: Colors.amberAccent.withOpacity(0.81)),
+                                                    color: Colors.amberAccent
+                                                        .withOpacity(0.81)),
                                               );
                                             },
                                           ),
-                                          // Tap overlay
                                           Positioned.fill(
-                                            child: IgnorePointer(), // Prevent tap through
+                                            child: IgnorePointer(),
                                           ),
                                         ],
                                       ),
@@ -2210,7 +2243,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 16),
                 Expanded(
                   child: GridView.builder(
@@ -2230,12 +2262,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             ? [
                                 Color(0xFF232526),
                                 Color(0xFF414345),
-                                Color(0xFF181A20), // Almost black
+                                Color(0xFF181A20),
                               ]
                             : [
-                                Color(0xFF0093E9), // App blue
-                                Color(0xFF80D0C7), // App teal
-                                Color(0xFFFCF6BA), // App yellow
+                                Color(0xFF0093E9),
+                                Color(0xFF80D0C7),
+                                Color(0xFFFCF6BA),
                               ];
 
                         final List<BoxShadow> boxShadows = _isDarkMode
@@ -2291,11 +2323,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   Container(
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(26),
-                                      gradient: LinearGradient(
-                                        colors: boxGradientColors,
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
                                       boxShadow: boxShadows,
                                       border: Border.all(
                                         color: locked
@@ -2395,6 +2422,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                                 .textTheme
                                                 .titleLarge!
                                                 .copyWith(
+                                              fontSize: 15,
                                               color: locked
                                                   ? Colors.redAccent
                                                   : Theme.of(context)

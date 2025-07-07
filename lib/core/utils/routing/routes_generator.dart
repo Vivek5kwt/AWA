@@ -72,7 +72,6 @@ final GoRouter appRouter = GoRouter(
       path: Routes.homeScreen,
       name: Routes.homeScreen,
       builder: (context, state) {
-        // Accept phoneNumber via extra
         final extra = state.extra as String? ?? '';
         return HomeScreen(phoneNumber: extra);
       },
@@ -116,10 +115,12 @@ final GoRouter appRouter = GoRouter(
       name: 'chatList',
       builder: (context, state) {
         final args = state.extra as Map<String, dynamic>? ?? {};
+        final isDarkMode = (args['isDarkMode'] ?? 'false') == 'true';
         return ChatScreen(
           name: args['name'] ?? '',
           phoneNumber: args['phoneNumber'] ?? '',
           id: args['id'] ?? '',
+          isDarkMode: isDarkMode,
         );
       },
     ),
@@ -205,7 +206,13 @@ final GoRouter appRouter = GoRouter(
         final String phoneOrEmail = state.extra as String? ?? '';
         return PremiumIntroScreen(
           logoAsset: 'assets/images/awa_logo.webp',
-          onContinue: () {
+          onContinue: (plan) {
+            context.goNamed(
+              Routes.homeScreen,
+              extra: phoneOrEmail,
+            );
+          },
+          onLater: () {
             context.goNamed(
               Routes.homeScreen,
               extra: phoneOrEmail,
@@ -214,6 +221,7 @@ final GoRouter appRouter = GoRouter(
         );
       },
     ),
+
     GoRoute(
       path: '/transactions',
       name: 'transactions',

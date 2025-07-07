@@ -1,3 +1,4 @@
+import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:rxdart/rxdart.dart';
@@ -150,7 +151,7 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "Contact Support",
+            context.loc.contactSupport,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -251,7 +252,7 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
                         style: TextStyle(
                             color: widget.isDarkMode ? Colors.white : Colors.black87),
                         decoration: InputDecoration(
-                          hintText: 'Type your message…',
+                          hintText: context.loc.typeAMsg,
                           hintStyle: TextStyle(
                               color: widget.isDarkMode ? Colors.white38 : Colors.black45),
                           border: InputBorder.none,
@@ -310,7 +311,7 @@ class _SupportChatBubble extends StatelessWidget {
                       size: 16, color: Colors.white),
                 ),
                 const SizedBox(width: 6),
-                Text('Support replied',
+                Text(context.loc.supportReplied,
                     style: TextStyle(
                         color: isDarkMode ? Colors.white70 : Colors.black54,
                         fontWeight: FontWeight.w600,

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -339,7 +340,7 @@ class _FriendListScreenState extends State<FriendListScreen>
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "Friend List",
+            context.loc.friendList,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -786,7 +787,7 @@ class _NoUsersWidget extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           Text(
-            'No users found!',
+            context.loc.noUserFound,
             style: TextStyle(
               color: isDarkMode ? Colors.white70 : Colors.blueGrey.shade800,
               fontWeight: FontWeight.bold,
@@ -795,7 +796,7 @@ class _NoUsersWidget extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           Text(
-            'Invite or search for new friends.',
+            context.loc.inviteOrSearch,
             style: TextStyle(
               color: isDarkMode ? Colors.white38 : Colors.blueGrey.shade400,
               fontSize: 16,

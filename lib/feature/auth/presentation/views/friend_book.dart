@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
@@ -40,7 +41,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
     [Color(0xFF30cfd0), Color(0xFF330867)],
     [Color(0xFF5f2c82), Color(0xFF49a09d)],
   ];
-
+  bool _isDarkMode = false;
   @override
   void initState() {
     super.initState();
@@ -48,6 +49,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
       vsync: this,
       duration: Duration(milliseconds: 950),
     );
+    _loadMode();
     _loadEmailAndFetch();
   }
 
@@ -56,7 +58,12 @@ class _FriendBookScreenState extends State<FriendBookScreen>
     _listAnimController.dispose();
     super.dispose();
   }
-
+  Future<void> _loadMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _isDarkMode = prefs.getBool('darkMode') ?? false;
+    });
+  }
   Future<void> _loadEmailAndFetch() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -78,7 +85,6 @@ class _FriendBookScreenState extends State<FriendBookScreen>
       print('Friend API call: $uri');
       final resp = await http.get(uri);
 
-      // If status code is 204 - Account deleted by admin
       if (resp.statusCode == 204) {
         await Future.delayed(const Duration(milliseconds: 600));
         if (mounted) showAccountDeletedDialog();
@@ -196,14 +202,14 @@ class _FriendBookScreenState extends State<FriendBookScreen>
           borderRadius: BorderRadius.circular(16),
         ),
         title: Text(
-          'Remove Friend',
+          context.loc.removeFriend,
           style: TextStyle(
             color: widget.isDarkMode ? Colors.white : Colors.black87,
             fontWeight: FontWeight.bold,
           ),
         ),
         content: Text(
-          'Are you sure you want to remove "${friendEmail.split('@').first}" from your friends?',
+          '${context.loc.areYouSure} ${friendEmail.split('@').first} ${context.loc.removeFromFriend}',
           style: TextStyle(
             color: widget.isDarkMode ? Colors.white70 : Colors.black54,
           ),
@@ -220,7 +226,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
             ),
             onPressed: () => Navigator.pop(ctx),
             child: Text(
-              'Cancel',
+              context.loc.cancel,
               style: TextStyle(
                 color: widget.isDarkMode ? Colors.white : Colors.black87,
               ),
@@ -238,8 +244,8 @@ class _FriendBookScreenState extends State<FriendBookScreen>
               Navigator.pop(ctx);
               _deleteFriend(friendEmail);
             },
-            child: const Text(
-              'Delete',
+            child:  Text(
+              context.loc.delete,
               style: TextStyle(color: Colors.white),
             ),
           ),
@@ -248,13 +254,12 @@ class _FriendBookScreenState extends State<FriendBookScreen>
     );
   }
 
-  // Mock profile for UI demo
   Future<FriendProfile> _getMockFriendProfile(String email) async {
     int hash = email.hashCode;
     return FriendProfile(
       name: email.split('@').first.capitalize(),
       email: email,
-      age: 20 + (hash % 14), // 20..33
+      age: 20 + (hash % 14),
       married: (hash % 3 == 0),
       bio: "Passionate coder, explorer, and coffee lover. Always up for a new challenge!",
       hobbies: ["Reading", "Cycling", "Music", "Movies", "Coding"],
@@ -406,7 +411,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
             end: Alignment.bottomRight,
           ).createShader(rect),
           child: Text(
-            "My Friends",
+            context.loc.myFriends,
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
@@ -507,7 +512,6 @@ class _FriendBookScreenState extends State<FriendBookScreen>
                   curve: Interval(0.06 * i, 0.4 + 0.11 * i,
                       curve: Curves.easeOut),
                 ));
-                // Defensive: don't allow empty email to be sent
                 return SlideTransition(
                   position: anim,
                   child: FadeTransition(
@@ -531,7 +535,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
                                   .withOpacity(0.09),
                               foregroundColor: Colors.redAccent,
                               icon: Icons.delete_outline_rounded,
-                              label: 'Delete',
+                              label: context.loc.delete,
                               spacing: 6,
                             ),
                           ],
@@ -641,6 +645,8 @@ class _FriendBookScreenState extends State<FriendBookScreen>
                                         widget.phoneNumber,
                                         'id': friendEmail,
                                         friendEmail: friendEmail,
+                                        'isDarkMode': _isDarkMode.toString()
+
                                       },
                                     );
 

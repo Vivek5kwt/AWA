@@ -1,10 +1,10 @@
 part of '../core/network/http_service.dart';
 abstract final class ApiConstants {
-  static const String baseUrl = "http://192.168.1.6:8000";
+  static const String baseUrl = "http://192.168.1.8:8000";
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register _user";
-  static const String loginUser = "${_apiBaseUrl}login_user";
-  static const String socialLogin = "${_apiBaseUrl}login_user";
+  static const String loginUser = "${_apiBaseUrl}login_user"; 
+  static const String socialLogin =  "${_apiBaseUrl}login_user";
   static const String registerSpeaker = "${_apiBaseUrl}register_speaker";
   static const String listSpeaker = "${_apiBaseUrl}list_speakers?email=";
   static const String listUsers = "${_apiBaseUrl}list_users";
@@ -22,4 +22,3 @@ abstract final class ApiConstants {
   static const String getSubPlan = "${_apiBaseUrl}get_subscription_plans";
   static const String getTransaction = "${_apiBaseUrl}get_transactions_by_email";
 }
-
