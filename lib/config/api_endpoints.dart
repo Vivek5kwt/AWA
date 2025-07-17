@@ -1,6 +1,6 @@
 part of '../core/network/http_service.dart';
 abstract final class ApiConstants {
-  static const String baseUrl = "http://192.168.1.8:8000";
+  static const String baseUrl = "http://172.232.104.30:8000";
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register _user";
   static const String loginUser = "${_apiBaseUrl}login_user"; 
