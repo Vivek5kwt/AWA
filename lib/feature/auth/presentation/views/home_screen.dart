@@ -84,7 +84,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     'assets/images/voice_listen3.webp',
   ];
 
-  final GlobalKey<ShowCaseWidgetState> _showCaseKey = GlobalKey();
   final GlobalKey _registerSpeakerKey = GlobalKey();
   final GlobalKey _identifySpeakerKey = GlobalKey();
   final GlobalKey _speakerBookKey = GlobalKey();
@@ -366,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       setState(() => _showTutorial = true);
       Future.delayed(const Duration(milliseconds: 900), () {
         if (mounted) {
-          _showCaseKey.currentState?.startShowCase([
+          ShowCaseWidget.of(context).startShowCase([
             _registerSpeakerKey,
             _identifySpeakerKey,
             _speakerBookKey,
