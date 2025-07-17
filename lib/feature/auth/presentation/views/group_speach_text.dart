@@ -34,8 +34,8 @@ class GroupSpeechToTextScreen extends StatefulWidget {
 
 class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with TickerProviderStateMixin {
   bool _isRecording = false;
-  Timer? _amplitudeTimer;
   double _amplitude = 0;
+  StreamSubscription<Amplitude>? _ampSubscription;
   late AnimationController _micGlowController;
   final AudioRecorder _recorder = AudioRecorder();
 
@@ -70,6 +70,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   late final FirebaseFirestore _firestore;
   late String _meetingDocId;
   bool _savingHistory = false;
+
+  String _latestSentence = '';
+  Timer? _latestSentenceTimer;
 
   @override
   void initState() {
@@ -128,7 +131,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   @override
   void dispose() {
-    _amplitudeTimer?.cancel();
+    _ampSubscription?.cancel();
+    _latestSentenceTimer?.cancel();
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
@@ -182,13 +186,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _speakerIndex = 0;
     });
 
-    _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 48), (_) {
-      if (!_isRecording) return;
-      setState(() {
-        _amplitude = 2200 + Random().nextInt(3400).toDouble();
-      });
-    });
-
     _currentFilePath = _generateTempFilePath();
     await _recorder.start(
       RecordConfig(
@@ -199,6 +196,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       ),
       path: _currentFilePath!,
     );
+
+    _ampSubscription?.cancel();
+    _ampSubscription = _recorder
+        .onAmplitudeChanged(const Duration(milliseconds: 60))
+        .listen((amp) {
+      if (!_isRecording) return;
+      setState(() {
+        _amplitude = 2000 + amp.current * 4000;
+      });
+    });
 
     _continueRecordingCycle();
   }
@@ -240,6 +247,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       path: _currentFilePath!,
     );
 
+    _ampSubscription?.cancel();
+    _ampSubscription = _recorder
+        .onAmplitudeChanged(const Duration(milliseconds: 60))
+        .listen((amp) {
+      if (!_isRecording) return;
+      setState(() {
+        _amplitude = 2000 + amp.current * 4000;
+      });
+    });
+
     if (_isRecording) {
       _continueRecordingCycle();
     }
@@ -270,7 +287,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = false;
       _amplitude = 0;
     });
-    _amplitudeTimer?.cancel();
+    _ampSubscription?.cancel();
 
     String? stoppedPath;
     if (await _recorder.isRecording()) {
@@ -518,6 +535,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               'spoken': false,
               'audioLabel': label,
             });
+            _latestSentence = text;
+            _latestSentenceTimer?.cancel();
+            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+              setState(() {
+                _latestSentence = '';
+              });
+            });
             _speakerIndex++;
           }
         });
@@ -560,6 +584,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         'spoken': false,
       });
       _textController.clear();
+      _latestSentence = msg;
+      _latestSentenceTimer?.cancel();
+      _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+        setState(() {
+          _latestSentence = '';
+        });
+      });
     });
 
     await _saveCurrentMeetingToFirestore();
@@ -971,6 +1002,25 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                   ),
                 ],
               ),
+              if (_latestSentence.isNotEmpty)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _latestSentence,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
               if (_showScrollDownBtn && _messages.isNotEmpty)
                 Positioned(
                   bottom: 90,
