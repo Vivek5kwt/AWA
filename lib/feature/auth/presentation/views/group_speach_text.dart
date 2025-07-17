@@ -35,7 +35,7 @@ class GroupSpeechToTextScreen extends StatefulWidget {
 class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with TickerProviderStateMixin {
   bool _isRecording = false;
   double _amplitude = 0;
-  StreamSubscription<Amplitude>? _ampSubscription;
+  Timer? _amplitudeTimer;
   late AnimationController _micGlowController;
   final AudioRecorder _recorder = AudioRecorder();
 
@@ -73,6 +73,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   String _latestSentence = '';
   Timer? _latestSentenceTimer;
+  Timer? _silenceTimer;
+  final Duration _silenceDuration = const Duration(minutes: 2);
 
   @override
   void initState() {
@@ -131,8 +133,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   @override
   void dispose() {
-    _ampSubscription?.cancel();
+    _amplitudeTimer?.cancel();
     _latestSentenceTimer?.cancel();
+    _silenceTimer?.cancel();
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
@@ -185,6 +188,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = true;
       _speakerIndex = 0;
     });
+    _resetSilenceTimer();
+
+    _amplitudeTimer?.cancel();
+    _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 48), (_) {
+      if (!_isRecording) return;
+      setState(() {
+        _amplitude = 2200 + Random().nextInt(3400).toDouble();
+      });
+    });
 
     _currentFilePath = _generateTempFilePath();
     await _recorder.start(
@@ -197,68 +209,49 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       path: _currentFilePath!,
     );
 
-    _ampSubscription?.cancel();
-    _ampSubscription = _recorder
-        .onAmplitudeChanged(const Duration(milliseconds: 60))
-        .listen((amp) {
-      if (!_isRecording) return;
-      setState(() {
-        _amplitude = 2000 + amp.current * 4000;
-      });
-    });
+
 
     _continueRecordingCycle();
   }
 
   Future<void> _continueRecordingCycle() async {
-    await Future.delayed(const Duration(seconds: 5));
-    if (!_isRecording) return;
+    while (_isRecording) {
+      await Future.delayed(const Duration(seconds: 5));
+      if (!_isRecording) break;
 
-    final String? stoppedPath = await _recorder.stop();
-    if (stoppedPath != null) {
-      final File audioFile = File(stoppedPath);
-      final label = _audioLabel++;
-      bool shouldSend = await _isAudioSignificant(audioFile);
-      if (shouldSend) {
-        _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
-        _processAudioQueue();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text("No voice detected, try again!"),
-            backgroundColor: Colors.orange.shade400,
-            duration: const Duration(milliseconds: 900),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+      final String? stoppedPath = await _recorder.stop();
+      if (stoppedPath != null) {
+        final File audioFile = File(stoppedPath);
+        final label = _audioLabel++;
+        bool shouldSend = await _isAudioSignificant(audioFile);
+        if (shouldSend) {
+          _resetSilenceTimer();
+          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
+          _processAudioQueue();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("No voice detected, try again!"),
+              backgroundColor: Colors.orange.shade400,
+              duration: const Duration(milliseconds: 900),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
-    }
 
-    if (!_isRecording) return;
+      if (!_isRecording) break;
 
-    _currentFilePath = _generateTempFilePath();
-    await _recorder.start(
-      RecordConfig(
-        encoder: AudioEncoder.wav,
-        bitRate: 256000,
-        sampleRate: 44100,
-        numChannels: 1,
-      ),
-      path: _currentFilePath!,
-    );
-
-    _ampSubscription?.cancel();
-    _ampSubscription = _recorder
-        .onAmplitudeChanged(const Duration(milliseconds: 60))
-        .listen((amp) {
-      if (!_isRecording) return;
-      setState(() {
-        _amplitude = 2000 + amp.current * 4000;
-      });
-    });
-
-    if (_isRecording) {
-      _continueRecordingCycle();
+      _currentFilePath = _generateTempFilePath();
+      await _recorder.start(
+        RecordConfig(
+          encoder: AudioEncoder.wav,
+          bitRate: 256000,
+          sampleRate: 44100,
+          numChannels: 1,
+        ),
+        path: _currentFilePath!,
+      );
     }
   }
 
@@ -287,7 +280,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = false;
       _amplitude = 0;
     });
-    _ampSubscription?.cancel();
+    _silenceTimer?.cancel();
+    _amplitudeTimer?.cancel();
 
     String? stoppedPath;
     if (await _recorder.isRecording()) {
@@ -304,6 +298,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
           final label = _audioLabel++;
           bool shouldSend = await _isAudioSignificant(file);
           if (shouldSend) {
+            _resetSilenceTimer();
             _audioQueue.add(_AudioQueueItem(file: file, label: label));
             _processAudioQueue();
           }
@@ -330,6 +325,39 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       return onlyLetters.length > text.length * 0.6;
     }
     return true;
+  }
+
+  void _resetSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceDuration, _handleSilenceTimeout);
+  }
+
+  void _handleSilenceTimeout() {
+    if (!_isRecording) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No voice detected'),
+        content: const Text(
+            'No voice detected for a while. Stop the conversation? You can start again when your meeting begins. Your meeting is saved.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _stopListening();
+            },
+            child: const Text('Stop'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resetSilenceTimer();
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _scrollToBottom({bool animate = true}) {
