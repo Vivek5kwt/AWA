@@ -1612,7 +1612,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              "Trial Expired",
+                              context.loc.trialExpired,
                               style: TextStyle(
                                 color: Colors.redAccent,
                                 fontWeight: FontWeight.bold,

@@ -83,5 +83,6 @@
   "male":"Male",
   "feMale":"Female",
   "other":"Other",
+  "trialExpired":"Trial Expired",
   "hindi":"Hindi"
 }
