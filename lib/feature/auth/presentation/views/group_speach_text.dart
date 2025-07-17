@@ -73,6 +73,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   String _latestSentence = '';
   Timer? _latestSentenceTimer;
+  Timer? _silenceTimer;
+  final Duration _silenceDuration = const Duration(minutes: 2);
 
   @override
   void initState() {
@@ -133,6 +135,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   void dispose() {
     _ampSubscription?.cancel();
     _latestSentenceTimer?.cancel();
+    _silenceTimer?.cancel();
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
@@ -185,6 +188,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = true;
       _speakerIndex = 0;
     });
+    _resetSilenceTimer();
 
     _currentFilePath = _generateTempFilePath();
     await _recorder.start(
@@ -220,6 +224,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       final label = _audioLabel++;
       bool shouldSend = await _isAudioSignificant(audioFile);
       if (shouldSend) {
+        _resetSilenceTimer();
         _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
         _processAudioQueue();
       } else {
@@ -287,6 +292,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = false;
       _amplitude = 0;
     });
+    _silenceTimer?.cancel();
     _ampSubscription?.cancel();
 
     String? stoppedPath;
@@ -304,6 +310,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
           final label = _audioLabel++;
           bool shouldSend = await _isAudioSignificant(file);
           if (shouldSend) {
+            _resetSilenceTimer();
             _audioQueue.add(_AudioQueueItem(file: file, label: label));
             _processAudioQueue();
           }
@@ -330,6 +337,39 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       return onlyLetters.length > text.length * 0.6;
     }
     return true;
+  }
+
+  void _resetSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceDuration, _handleSilenceTimeout);
+  }
+
+  void _handleSilenceTimeout() {
+    if (!_isRecording) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No voice detected'),
+        content: const Text(
+            'No voice detected for a while. Stop the conversation? You can start again when your meeting begins. Your meeting is saved.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _stopListening();
+            },
+            child: const Text('Stop'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resetSilenceTimer();
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _scrollToBottom({bool animate = true}) {
