@@ -85,8 +85,12 @@
   "other":"অন্যান্য",
   "trialExpired":"বিচারের মেয়াদ শেষ",
   "hindi": "হিন্দি",
-  "nameFieldIntro":"এটা তোমার বন্ধুর নাম।",
+  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
   "repeatSentenceHint":"সমস্ত প্রশ্ন সম্পূর্ণ করতে প্রদর্শিত বাক্যটি পুনরাবৃত্তি করুন।",
   "speakerListIntro":"এই স্ক্রিনে আপনার নিবন্ধিত স্পিকারগুলির তালিকা রয়েছে।",
-  "speakerAddIntro":"নতুন ভয়েস নিবন্ধন করতে স্পিকার যোগ করুন-এ ট্যাপ করুন।"
+  "speakerAddIntro":"নতুন ভয়েস নিবন্ধন করতে স্পিকার যোগ করুন-এ ট্যাপ করুন।",
+  "friendListIntro":"Browse people and send them a friend request.",
+  "friendAddIntro":"Tap the add icon to connect and start chatting.",
+  "friendBookIntro":"Your approved friends appear here.",
+  "friendChatIntro":"Tap the chat bubble to start a conversation."
 }
