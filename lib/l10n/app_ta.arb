@@ -85,8 +85,12 @@
   "other":"மற்றவை",
   "hindi": "இந்தி",
   "trialExpired":"சோதனை காலாவதியானது",
-  "nameFieldIntro":"இது உங்க ஃப்ரெண்ட் பேரு.",
+  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
   "repeatSentenceHint":"அனைத்து கேள்விகளையும் முடிக்க காட்டப்படும் வாக்கியத்தை மீண்டும் செய்யவும்.",
   "speakerListIntro":"இந்தத் திரை உங்கள் பதிவுசெய்யப்பட்ட பேச்சாளர்களைப் பட்டியலிடுகிறது.",
-  "speakerAddIntro":"புதிய குரலைப் பதிவு செய்ய, பேச்சாளரைச் சேர் என்பதைத் தட்டவும்."
+  "speakerAddIntro":"புதிய குரலைப் பதிவு செய்ய, பேச்சாளரைச் சேர் என்பதைத் தட்டவும்.",
+  "friendListIntro":"Browse people and send them a friend request.",
+  "friendAddIntro":"Tap the add icon to connect and start chatting.",
+  "friendBookIntro":"Your approved friends appear here.",
+  "friendChatIntro":"Tap the chat bubble to start a conversation."
 }

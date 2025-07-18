@@ -85,8 +85,12 @@
   "other":"Other",
   "trialExpired":"Trial Expired",
   "hindi":"Hindi",
-  "nameFieldIntro":"This is your friend's name.",
+  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
   "repeatSentenceHint":"Repeat the displayed sentence to complete all questions.",
   "speakerListIntro":"This screen lists your registered speakers.",
-  "speakerAddIntro":"Tap Add Speaker to register a new voice."
+  "speakerAddIntro":"Tap Add Speaker to register a new voice.",
+  "friendListIntro":"Browse people and send them a friend request.",
+  "friendAddIntro":"Tap the add icon to connect and start chatting.",
+  "friendBookIntro":"Your approved friends appear here.",
+  "friendChatIntro":"Tap the chat bubble to start a conversation."
 }

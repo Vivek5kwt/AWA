@@ -29,6 +29,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
   String? _error;
   List<String> _friendEmails = [];
   String _email = '';
+  bool _showIntro = false;
 
   late final AnimationController _listAnimController;
 
@@ -50,6 +51,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
       duration: Duration(milliseconds: 950),
     );
     _loadMode();
+    _loadIntro();
     _loadEmailAndFetch();
   }
 
@@ -63,6 +65,13 @@ class _FriendBookScreenState extends State<FriendBookScreen>
     setState(() {
       _isDarkMode = prefs.getBool('darkMode') ?? false;
     });
+  }
+
+  Future<void> _loadIntro() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shown = prefs.getBool('friend_book_intro_shown') ?? false;
+    if (mounted) setState(() => _showIntro = !shown);
+    if (!shown) await prefs.setBool('friend_book_intro_shown', true);
   }
   Future<void> _loadEmailAndFetch() async {
     final prefs = await SharedPreferences.getInstance();
@@ -250,6 +259,46 @@ class _FriendBookScreenState extends State<FriendBookScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildIntroOverlay() {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showIntro = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.group, color: Colors.white, size: 64),
+                const SizedBox(height: 20),
+                Text(
+                  context.loc.friendBookIntro,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.loc.friendChatIntro,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 15,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -461,16 +510,18 @@ class _FriendBookScreenState extends State<FriendBookScreen>
           ),
         ),
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: gradientColors,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            stops: const [0.1, 0.7, 1.0],
-          ),
-        ),
-        child: SafeArea(
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: const [0.1, 0.7, 1.0],
+              ),
+            ),
+            child: SafeArea(
           child: _loading
               ? const Center(
             child: CircularProgressIndicator(color: Colors.cyanAccent),
@@ -673,6 +724,8 @@ class _FriendBookScreenState extends State<FriendBookScreen>
             ),
           ),
         ),
+          if (_showIntro) _buildIntroOverlay(context),
+        ],
       ),
     );
   }
