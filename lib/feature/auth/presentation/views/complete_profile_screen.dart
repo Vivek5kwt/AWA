@@ -557,35 +557,35 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
                                           )
                                         ],
                                       ),
-                                      child: CircleAvatar(
-                                        radius: 62,
-                                        backgroundColor: Colors.transparent,
-                                        backgroundImage:
-                                        _profileImage != null
-                                            ? FileImage(_profileImage!)
-                                        as ImageProvider
-                                            : (_existingPicUrl != null &&
-                                            _existingPicUrl!
-                                                .trim()
-                                                .isNotEmpty
-                                            ? NetworkImage(
-                                            ApiConstants.baseUrl +
-                                                _existingPicUrl!)
-                                            : null),
+                                      child: Container(
+                                        width: 126,
+                                        height: 126,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          image: _profileImage != null
+                                              ? DecorationImage(
+                                                  image: FileImage(_profileImage!),
+                                                  fit: BoxFit.cover,
+                                                )
+                                              : (_existingPicUrl != null &&
+                                                      _existingPicUrl!.trim().isNotEmpty)
+                                                  ? DecorationImage(
+                                                      image: NetworkImage(
+                                                          ApiConstants.baseUrl + _existingPicUrl!),
+                                                      fit: BoxFit.cover,
+                                                    )
+                                                  : null,
+                                        ),
                                         child: (_profileImage == null &&
-                                            (_existingPicUrl == null ||
-                                                _existingPicUrl!
-                                                    .trim()
-                                                    .isEmpty))
+                                                (_existingPicUrl == null ||
+                                                    _existingPicUrl!.trim().isEmpty))
                                             ? Icon(
-                                          Icons.camera_alt,
-                                          size: 42,
-                                          color: isDark
-                                              ? Colors.white
-                                              .withOpacity(0.7)
-                                              : Colors.white
-                                              .withOpacity(0.7),
-                                        )
+                                                Icons.camera_alt,
+                                                size: 42,
+                                                color: isDark
+                                                    ? Colors.white.withOpacity(0.7)
+                                                    : Colors.white.withOpacity(0.7),
+                                              )
                                             : null,
                                       ),
                                     ),
