@@ -73,7 +73,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     _nameController = TextEditingController(text: widget.name);
     _loadStoredEmail();
     _loadTutorialFlags();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _askForContactName());
 
     _micPulse = AnimationController(
       vsync: this,
@@ -118,6 +117,12 @@ class _AddContactScreenState extends State<AddContactScreen>
       });
     }
     if (!micShown) await prefs.setBool('add_contact_mic_tutorial_shown', true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (nameShown) {
+        _askForContactName();
+      }
+    });
   }
 
   void _revealWords() {
@@ -330,19 +335,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      if (_showNameIntro)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12.0),
-                          child: Text(
-                            context.loc.nameFieldIntro,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: isDark ? Colors.white70 : Colors.black87,
-                              fontSize: 13,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
+
                       const SizedBox(height: 16),
 
                       // Name TextField (no labelText)
@@ -420,11 +413,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _dialogActive = false;
-
-    if (_showNameIntro) {
-      await prefs.setBool('add_contact_name_intro_shown', true);
-      if (mounted) setState(() => _showNameIntro = false);
-    }
 
     if (enteredName == null || enteredName.trim().isEmpty) {
       _nameController?.dispose();
@@ -607,6 +595,54 @@ class _AddContactScreenState extends State<AddContactScreen>
                 Text(
                   context.loc.tapMicToRecord,
                   style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _hideNameIntro() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('add_contact_name_intro_shown', true);
+    if (!mounted) return;
+    setState(() => _showNameIntro = false);
+    _askForContactName();
+  }
+
+  Widget _buildNameIntroOverlay(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _hideNameIntro,
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.person, color: Colors.white, size: 64),
+                const SizedBox(height: 20),
+                Text(
+                  context.loc.enterAFriendlyName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.loc.nameFieldIntro,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 15,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -893,6 +929,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                 ],
               ),
             ),
+            if (_showNameIntro) _buildNameIntroOverlay(context),
             if (_showRepeatTutorial) _buildRepeatTutorialOverlay(context),
             if (_showMicTutorial) _buildTutorialOverlay(context),
           ],

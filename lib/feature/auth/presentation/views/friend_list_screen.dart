@@ -28,6 +28,7 @@ class _FriendListScreenState extends State<FriendListScreen>
   String? _error;
   List<User> _users = [];
   String _email = '';
+  bool _showIntro = false;
 
   final List<List<Color>> _avatarGradients = [
     [Color(0xFF8EC5FC), Color(0xFFE0C3FC)],
@@ -47,6 +48,7 @@ class _FriendListScreenState extends State<FriendListScreen>
       vsync: this,
       duration: Duration(milliseconds: 950),
     );
+    _loadIntro();
     _loadEmailAndFetch();
   }
 
@@ -54,6 +56,13 @@ class _FriendListScreenState extends State<FriendListScreen>
   void dispose() {
     _listAnimController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadIntro() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shown = prefs.getBool('friend_list_intro_shown') ?? false;
+    if (mounted) setState(() => _showIntro = !shown);
+    if (!shown) await prefs.setBool('friend_list_intro_shown', true);
   }
 
   Future<void> _loadEmailAndFetch() async {
@@ -304,6 +313,46 @@ class _FriendListScreenState extends State<FriendListScreen>
     );
   }
 
+  Widget _buildIntroOverlay() {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showIntro = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.person_add_alt_1, color: Colors.white, size: 64),
+                const SizedBox(height: 20),
+                Text(
+                  context.loc.friendListIntro,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.loc.friendAddIntro,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 15,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final gradientColors = widget.isDarkMode
@@ -371,21 +420,23 @@ class _FriendListScreenState extends State<FriendListScreen>
           ),
         ),
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: gradientColors,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            stops: const [0.1, 0.7, 1.0],
-          ),
-        ),
-        child: SafeArea(
-          child: _loading
-              ? const Center(
-            child: CircularProgressIndicator(color: Colors.cyanAccent),
-          )
-              : _error != null
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: const [0.1, 0.7, 1.0],
+              ),
+            ),
+            child: SafeArea(
+              child: _loading
+                  ? const Center(
+                child: CircularProgressIndicator(color: Colors.cyanAccent),
+              )
+                  : _error != null
               ? Center (
             child: Text(
               _error!,
@@ -524,8 +575,10 @@ class _FriendListScreenState extends State<FriendListScreen>
                 );
               },
             ),
+            ),
           ),
-        ),
+          if (_showIntro) _buildIntroOverlay(context),
+        ],
       ),
     );
   }
@@ -768,6 +821,7 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
+
 
 class _NoUsersWidget extends StatelessWidget {
   final bool isDarkMode;
