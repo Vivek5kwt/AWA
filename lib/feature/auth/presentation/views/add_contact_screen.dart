@@ -58,6 +58,10 @@ class _AddContactScreenState extends State<AddContactScreen>
   bool _userStartedSpeaking = false;
   DateTime? _lastVoiceTime;
   bool _dialogActive = false;
+  bool _showMicTutorial = false;
+  bool _showRepeatTutorial = false;
+  bool _repeatTutorialSeen = false;
+  bool _showNameIntro = false;
 
   static const int silenceThresholdMs = 700;
   static const int ignoreInitialMs = 300;
@@ -68,6 +72,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     super.initState();
     _nameController = TextEditingController(text: widget.name);
     _loadStoredEmail();
+    _loadTutorialFlags();
     WidgetsBinding.instance.addPostFrameCallback((_) => _askForContactName());
 
     _micPulse = AnimationController(
@@ -98,6 +103,21 @@ class _AddContactScreenState extends State<AddContactScreen>
     setState(() {
       _email = prefs.getString('email') ?? '';
     });
+  }
+
+  Future<void> _loadTutorialFlags() async {
+    final prefs = await SharedPreferences.getInstance();
+    final micShown = prefs.getBool('add_contact_mic_tutorial_shown') ?? false;
+    final repeatShown = prefs.getBool('add_contact_repeat_tutorial_shown') ?? false;
+    final nameShown = prefs.getBool('add_contact_name_intro_shown') ?? false;
+    if (mounted) {
+      setState(() {
+        _showMicTutorial = !micShown;
+        _repeatTutorialSeen = repeatShown;
+        _showNameIntro = !nameShown;
+      });
+    }
+    if (!micShown) await prefs.setBool('add_contact_mic_tutorial_shown', true);
   }
 
   void _revealWords() {
@@ -219,6 +239,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   Future<void> _askForContactName() async {
     _dialogActive = true;
     final isDark = widget.isDarkMode;
+    final prefs = await SharedPreferences.getInstance();
 
     final enteredName = await showDialog<String>(
       context: context,
@@ -309,6 +330,19 @@ class _AddContactScreenState extends State<AddContactScreen>
                         ),
                         textAlign: TextAlign.center,
                       ),
+                      if (_showNameIntro)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12.0),
+                          child: Text(
+                            context.loc.nameFieldIntro,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 16),
 
                       // Name TextField (no labelText)
@@ -386,6 +420,11 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _dialogActive = false;
+
+    if (_showNameIntro) {
+      await prefs.setBool('add_contact_name_intro_shown', true);
+      if (mounted) setState(() => _showNameIntro = false);
+    }
 
     if (enteredName == null || enteredName.trim().isEmpty) {
       _nameController?.dispose();
@@ -479,11 +518,103 @@ class _AddContactScreenState extends State<AddContactScreen>
   }
 
   void _onMicTap() {
+    if (!_repeatTutorialSeen) {
+      setState(() => _showRepeatTutorial = true);
+      _repeatTutorialSeen = true;
+      SharedPreferences.getInstance().then((p) => p.setBool('add_contact_repeat_tutorial_shown', true));
+      return;
+    }
     if (_isRecording) {
       _stopRecording();
     } else {
       _startRecording();
     }
+  }
+
+  Widget _buildTutorialOverlay(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showMicTutorial = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 110,
+                  height: 110,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white24,
+                  ),
+                  child: const Icon(Icons.mic, color: Colors.white, size: 60),
+                ),
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    context.loc.tapMicToStart,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    context.loc.tapMicToRecord,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 16,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRepeatTutorialOverlay(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showRepeatTutorial = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.record_voice_over, color: Colors.white, size: 60),
+                const SizedBox(height: 16),
+                Text(
+                  context.loc.repeatSentenceHint,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  context.loc.tapMicToRecord,
+                  style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -543,8 +674,10 @@ class _AddContactScreenState extends State<AddContactScreen>
             stops: const [0.1, 0.7, 1.0],
           ),
         ),
-        child: SafeArea(
-          child: Column(
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 16),
@@ -758,7 +891,11 @@ class _AddContactScreenState extends State<AddContactScreen>
                   child: CircularProgressIndicator(color: Colors.purpleAccent),
                 ),
             ],
-          ),
+              ),
+            ),
+            if (_showRepeatTutorial) _buildRepeatTutorialOverlay(context),
+            if (_showMicTutorial) _buildTutorialOverlay(context),
+          ],
         ),
       ),
     );

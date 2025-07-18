@@ -29,6 +29,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
   List<Speaker> _speakers = [];
   String _email = '';
   String _loginType = '';
+  bool _showIntro = false;
 
   late final AnimationController _listAnimController;
 
@@ -170,7 +171,9 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     setState(() {
       _email = prefs.getString('email') ?? '';
       _loginType = prefs.getString('login_type') ?? '';
+      _showIntro = !(prefs.getBool('speaker_intro_shown') ?? false);
     });
+    if (_showIntro) await prefs.setBool('speaker_intro_shown', true);
     await _fetchSpeakers();
   }
 
@@ -478,30 +481,32 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
             stops: const [0.1, 0.7, 1.0],
           ),
         ),
-        child: SafeArea(
-          child: _loading
+        child: Stack(
+          children: [
+            SafeArea(
+              child: _loading
               ? const Center(child: CircularProgressIndicator(color: Colors.cyanAccent))
               : _error != null
               ? Center(
-            child: Text(
-              _error!,
-              style: const TextStyle(color: Colors.redAccent, fontSize: 16),
-            ),
-          )
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 16),
+                ),
+              )
               : RefreshIndicator(
-            onRefresh: _fetchSpeakers,
-            color: widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
-            backgroundColor: widget.isDarkMode ? Colors.grey[900]! : Colors.white,
-            edgeOffset: 20,
-            child: _speakers.isEmpty
-                ? _NoSpeakersWidget(
-              isDarkMode: widget.isDarkMode,
-              phoneNumber: widget.phoneNumber,
-            )
-                : ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.only(top: 12, left: 18, right: 18, bottom: 40),
-              itemCount: _speakers.length,
+                onRefresh: _fetchSpeakers,
+                color: widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
+                backgroundColor: widget.isDarkMode ? Colors.grey[900]! : Colors.white,
+                edgeOffset: 20,
+                child: _speakers.isEmpty
+                    ? _NoSpeakersWidget(
+                        isDarkMode: widget.isDarkMode,
+                        phoneNumber: widget.phoneNumber,
+                      )
+                    : ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(top: 12, left: 18, right: 18, bottom: 40),
+                        itemCount: _speakers.length,
               itemBuilder: (_, i) {
                 final s = _speakers[i];
                 final avatarColors = _avatarGradients[i % _avatarGradients.length];
@@ -684,6 +689,49 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                   ),
                 );
               },
+            ),
+          ),
+            ),
+            if (_showIntro) _buildIntroOverlay(context),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIntroOverlay(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showIntro = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.person_search, color: Colors.white, size: 64),
+                const SizedBox(height: 20),
+                Text(
+                  context.loc.speakerListIntro,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  context.loc.speakerAddIntro,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 15,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
           ),
         ),

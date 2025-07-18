@@ -84,5 +84,9 @@
   "feMale":"பெண்",
   "other":"மற்றவை",
   "hindi": "இந்தி",
-  "trialExpired":"சோதனை காலாவதியானது"
-}
+  "trialExpired":"சோதனை காலாவதியானது",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions.",
+  "speakerListIntro":"This screen lists your registered speakers.",
+  "speakerAddIntro":"Tap Add Speaker to register a new voice."
+ }

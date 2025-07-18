@@ -84,5 +84,9 @@
   "feMale":"સ્ત્રી",
   "other":"અન્ય",
   "trialExpired":"ટ્રાયલ સમાપ્ત",
-  "hindi": "હિન્દી"
-}
+  "hindi": "હિન્દી",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions.",
+  "speakerListIntro":"This screen lists your registered speakers.",
+  "speakerAddIntro":"Tap Add Speaker to register a new voice."
+ }

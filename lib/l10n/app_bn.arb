@@ -84,5 +84,9 @@
   "feMale":"মহিলা",
   "other":"অন্যান্য",
   "trialExpired":"বিচারের মেয়াদ শেষ",
-  "hindi": "হিন্দি"
+  "hindi": "হিন্দি",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions.",
+  "speakerListIntro":"This screen lists your registered speakers.",
+  "speakerAddIntro":"Tap Add Speaker to register a new voice."
 }

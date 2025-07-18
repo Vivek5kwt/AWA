@@ -84,5 +84,9 @@
   "feMale":"स्त्री",
   "other":"इतर",
   "hindi": "हिंदी",
-  "trialExpired":"चाचणी कालबाह्य झाली"
-}
+  "trialExpired":"चाचणी कालबाह्य झाली",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions.",
+  "speakerListIntro":"This screen lists your registered speakers.",
+  "speakerAddIntro":"Tap Add Speaker to register a new voice."
+ }
