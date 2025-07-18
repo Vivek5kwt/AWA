@@ -84,6 +84,8 @@
   "feMale":"महिला",
   "other":"अन्य",
   "trialExpired":"परीक्षण समाप्त",
-  "hindi":"हिंदी"
+  "hindi":"हिंदी",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions."
 }
 

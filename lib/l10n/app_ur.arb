@@ -84,5 +84,7 @@
   "feMale":"خاتون",
   "other":"دیگر",
   "hindi": "ہندی",
-  "trialExpired":"مقدمے کی مدت ختم ہو گئی۔"
+  "trialExpired":"مقدمے کی مدت ختم ہو گئی۔",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions."
 }

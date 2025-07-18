@@ -84,5 +84,7 @@
   "feMale":"ਔਰਤ",
   "other":"ਹੋਰ",
   "hindi": "ਹਿੰਦੀ",
-  "trialExpired":"ਮੁਕੱਦਮੇ ਦੀ ਮਿਆਦ ਪੁੱਗ ਗਈ"
+  "trialExpired":"ਮੁਕੱਦਮੇ ਦੀ ਮਿਆਦ ਪੁੱਗ ਗਈ",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions."
 }
