@@ -59,6 +59,9 @@ class _AddContactScreenState extends State<AddContactScreen>
   DateTime? _lastVoiceTime;
   bool _dialogActive = false;
   bool _showMicTutorial = false;
+  bool _showRepeatTutorial = false;
+  bool _repeatTutorialSeen = false;
+  bool _showNameIntro = false;
 
   static const int silenceThresholdMs = 700;
   static const int ignoreInitialMs = 300;
@@ -69,7 +72,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     super.initState();
     _nameController = TextEditingController(text: widget.name);
     _loadStoredEmail();
-    _checkFirstTime();
+    _loadTutorialFlags();
     WidgetsBinding.instance.addPostFrameCallback((_) => _askForContactName());
 
     _micPulse = AnimationController(
@@ -102,13 +105,19 @@ class _AddContactScreenState extends State<AddContactScreen>
     });
   }
 
-  Future<void> _checkFirstTime() async {
+  Future<void> _loadTutorialFlags() async {
     final prefs = await SharedPreferences.getInstance();
-    final shown = prefs.getBool('add_contact_tutorial_shown') ?? false;
-    if (!shown && mounted) {
-      setState(() => _showMicTutorial = true);
-      await prefs.setBool('add_contact_tutorial_shown', true);
+    final micShown = prefs.getBool('add_contact_mic_tutorial_shown') ?? false;
+    final repeatShown = prefs.getBool('add_contact_repeat_tutorial_shown') ?? false;
+    final nameShown = prefs.getBool('add_contact_name_intro_shown') ?? false;
+    if (mounted) {
+      setState(() {
+        _showMicTutorial = !micShown;
+        _repeatTutorialSeen = repeatShown;
+        _showNameIntro = !nameShown;
+      });
     }
+    if (!micShown) await prefs.setBool('add_contact_mic_tutorial_shown', true);
   }
 
   void _revealWords() {
@@ -230,6 +239,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   Future<void> _askForContactName() async {
     _dialogActive = true;
     final isDark = widget.isDarkMode;
+    final prefs = await SharedPreferences.getInstance();
 
     final enteredName = await showDialog<String>(
       context: context,
@@ -320,6 +330,19 @@ class _AddContactScreenState extends State<AddContactScreen>
                         ),
                         textAlign: TextAlign.center,
                       ),
+                      if (_showNameIntro)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12.0),
+                          child: Text(
+                            context.loc.nameFieldIntro,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 16),
 
                       // Name TextField (no labelText)
@@ -397,6 +420,11 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _dialogActive = false;
+
+    if (_showNameIntro) {
+      await prefs.setBool('add_contact_name_intro_shown', true);
+      if (mounted) setState(() => _showNameIntro = false);
+    }
 
     if (enteredName == null || enteredName.trim().isEmpty) {
       _nameController?.dispose();
@@ -490,6 +518,12 @@ class _AddContactScreenState extends State<AddContactScreen>
   }
 
   void _onMicTap() {
+    if (!_repeatTutorialSeen) {
+      setState(() => _showRepeatTutorial = true);
+      _repeatTutorialSeen = true;
+      SharedPreferences.getInstance().then((p) => p.setBool('add_contact_repeat_tutorial_shown', true));
+      return;
+    }
     if (_isRecording) {
       _stopRecording();
     } else {
@@ -497,61 +531,87 @@ class _AddContactScreenState extends State<AddContactScreen>
     }
   }
 
-  Widget _buildTutorialOverlay(BuildContext context, Size size) {
+  Widget _buildTutorialOverlay(BuildContext context) {
     return Positioned.fill(
-      child: Container(
-        color: Colors.black87.withOpacity(0.7),
-        child: Stack(
-          children: [
-            Align(
-              alignment: Alignment.topRight,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => setState(() => _showMicTutorial = false),
-              ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showMicTutorial = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 110,
+                  height: 110,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white24,
+                  ),
+                  child: const Icon(Icons.mic, color: Colors.white, size: 60),
+                ),
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    context.loc.tapMicToStart,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    context.loc.tapMicToRecord,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 16,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
             ),
-            Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 110,
-                    height: 110,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white24,
-                    ),
-                    child: const Icon(Icons.mic, color: Colors.white, size: 60),
-                  ),
-                  const SizedBox(height: 20),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Text(
-                      context.loc.tapMicToStart,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                    child: Text(
-                      context.loc.tapMicToRecord,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.9),
-                        fontSize: 16,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ],
-              ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRepeatTutorialOverlay(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showRepeatTutorial = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.record_voice_over, color: Colors.white, size: 60),
+                const SizedBox(height: 16),
+                Text(
+                  context.loc.repeatSentenceHint,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  context.loc.tapMicToRecord,
+                  style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -618,222 +678,223 @@ class _AddContactScreenState extends State<AddContactScreen>
           children: [
             SafeArea(
               child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 16),
-              _ProgressDots(
-                current: _currentIndex,
-                total: _sentences.length,
-                isDarkMode: widget.isDarkMode,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                "${context.loc.youAreOnQuestion} ${_currentIndex + 1} ${context.loc.of_text} ${_sentences.length}",
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.88),
-                  fontWeight: FontWeight.w500,
-                  fontSize: 18,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                width: size.width * 0.93,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                decoration: BoxDecoration(
-                  color: containerColor,
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  _sentences[_currentIndex],
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 22,
-                    letterSpacing: 0.2,
-                    shadows: [Shadow(color: Colors.black12, blurRadius: 5)],
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 16),
+                  _ProgressDots(
+                    current: _currentIndex,
+                    total: _sentences.length,
+                    isDarkMode: widget.isDarkMode,
                   ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Expanded(
-                child: Center(
-                  child: Stack(
+                  const SizedBox(height: 12),
+                  Text(
+                    "${context.loc.youAreOnQuestion} ${_currentIndex + 1} ${context.loc.of_text} ${_sentences.length}",
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.88),
+                      fontWeight: FontWeight.w500,
+                      fontSize: 18,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: size.width * 0.93,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: containerColor,
+                      borderRadius: BorderRadius.circular(28),
+                    ),
                     alignment: Alignment.center,
-                    children: [
-                      AnimatedOpacity(
-                        opacity: _isRecording ? 1 : 0.19,
-                        duration: const Duration(milliseconds: 200),
-                        child: SizedBox(
-                          width: size.width * 0.6,
-                          height: size.width * 0.6,
-                          child: WaveBlob(
-                            amplitude: _isRecording ? _amplitude : 1800,
-                            autoScale: true,
-                            blobCount: 2,
-                            scale: 1.0,
-                            centerCircle: true,
-                            overCircle: true,
-                            circleColors: widget.isDarkMode
-                                ? [const Color(0xFF5CE1E6), const Color(0xFF1F1C2C)]
-                                : [const Color(0xFF30DCFF), const Color(0xFF6C7BFF)],
-                            child: const SizedBox.shrink(),
-                          ),
-                        ),
+                    child: Text(
+                      _sentences[_currentIndex],
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22,
+                        letterSpacing: 0.2,
+                        shadows: [Shadow(color: Colors.black12, blurRadius: 5)],
                       ),
-                      _showSuccess
-                          ? ScaleTransition(
-                        scale: _burstScale,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.verified_rounded,
-                                color: Colors.greenAccent.shade400,
-                                size: 90),
-                            const SizedBox(height: 8),
-                            ShaderMask(
-                              shaderCallback: (Rect bounds) {
-                                return const LinearGradient(
-                                  colors: [
-                                    Colors.greenAccent,
-                                    Colors.white,
-                                    Colors.greenAccent
-                                  ],
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                ).createShader(bounds);
-                              },
-                              child:  Text(
-                                context.loc.voiceMatched,
-                                style: TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: Center(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          AnimatedOpacity(
+                            opacity: _isRecording ? 1 : 0.19,
+                            duration: const Duration(milliseconds: 200),
+                            child: SizedBox(
+                              width: size.width * 0.6,
+                              height: size.width * 0.6,
+                              child: WaveBlob(
+                                amplitude: _isRecording ? _amplitude : 1800,
+                                autoScale: true,
+                                blobCount: 2,
+                                scale: 1.0,
+                                centerCircle: true,
+                                overCircle: true,
+                                circleColors: widget.isDarkMode
+                                    ? [const Color(0xFF5CE1E6), const Color(0xFF1F1C2C)]
+                                    : [const Color(0xFF30DCFF), const Color(0xFF6C7BFF)],
+                                child: const SizedBox.shrink(),
                               ),
                             ),
-                          ],
-                        ),
-                      )
-                          : ScaleTransition(
-                        scale: _micPulse,
-                        child: GestureDetector(
-                          onTap: _onMicTap,
-                          child: Container(
-                            width: 100,
-                            height: 100,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: LinearGradient(
-                                colors: _isRecording
-                                    ? [Colors.redAccent, Colors.deepOrange]
-                                    : [
-                                  widget.isDarkMode
-                                      ? Colors.white10
-                                      : Colors.white24,
-                                  widget.isDarkMode
-                                      ? Colors.white24
-                                      : Colors.white38
-                                ],
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black45, blurRadius: 8),
-                                if (_isRecording)
-                                  BoxShadow(
-                                    color: Colors.redAccent.withOpacity(0.5),
-                                    blurRadius: 20,
-                                    spreadRadius: 5,
+                          ),
+                          _showSuccess
+                              ? ScaleTransition(
+                            scale: _burstScale,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.verified_rounded,
+                                    color: Colors.greenAccent.shade400,
+                                    size: 90),
+                                const SizedBox(height: 8),
+                                ShaderMask(
+                                  shaderCallback: (Rect bounds) {
+                                    return const LinearGradient(
+                                      colors: [
+                                        Colors.greenAccent,
+                                        Colors.white,
+                                        Colors.greenAccent
+                                      ],
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                    ).createShader(bounds);
+                                  },
+                                  child:  Text(
+                                    context.loc.voiceMatched,
+                                    style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white),
                                   ),
+                                ),
                               ],
                             ),
-                            child: Icon(
-                              _isRecording ? Icons.stop : Icons.mic,
-                              color: Colors.white,
-                              size: 40,
+                          )
+                              : ScaleTransition(
+                            scale: _micPulse,
+                            child: GestureDetector(
+                              onTap: _onMicTap,
+                              child: Container(
+                                width: 100,
+                                height: 100,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: LinearGradient(
+                                    colors: _isRecording
+                                        ? [Colors.redAccent, Colors.deepOrange]
+                                        : [
+                                      widget.isDarkMode
+                                          ? Colors.white10
+                                          : Colors.white24,
+                                      widget.isDarkMode
+                                          ? Colors.white24
+                                          : Colors.white38
+                                    ],
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: Colors.black45, blurRadius: 8),
+                                    if (_isRecording)
+                                      BoxShadow(
+                                        color: Colors.redAccent.withOpacity(0.5),
+                                        blurRadius: 20,
+                                        spreadRadius: 5,
+                                      ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  _isRecording ? Icons.stop : Icons.mic,
+                                  color: Colors.white,
+                                  size: 40,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: LinearProgressIndicator(
-                  value: _isRecording ? null : (_currentIndex + 1) / _sentences.length,
-                  minHeight: 6.5,
-                  backgroundColor: progressBarBg,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    widget.isDarkMode ? Colors.cyanAccent : Colors.pinkAccent,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: LinearProgressIndicator(
+                      value: _isRecording ? null : (_currentIndex + 1) / _sentences.length,
+                      minHeight: 6.5,
+                      backgroundColor: progressBarBg,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        widget.isDarkMode ? Colors.cyanAccent : Colors.pinkAccent,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-              Container(
-                width: size.width * 0.90,
-                padding: const EdgeInsets.symmetric(vertical: 15),
-                margin: const EdgeInsets.only(bottom: 3),
-                decoration: BoxDecoration(
-                  color: containerColor,
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(
-                    color: borderColor,
-                    width: 2,
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Wrap(
-                  alignment: WrapAlignment.center,
-                  children: List.generate(words.length, (i) {
-                    return AnimatedOpacity(
-                      duration: const Duration(milliseconds: 300),
-                      opacity: _wordVisible[i] ? 1 : 0,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Text(
-                          words[i],
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                  Container(
+                    width: size.width * 0.90,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    margin: const EdgeInsets.only(bottom: 3),
+                    decoration: BoxDecoration(
+                      color: containerColor,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(
+                        color: borderColor,
+                        width: 2,
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      children: List.generate(words.length, (i) {
+                        return AnimatedOpacity(
+                          duration: const Duration(milliseconds: 300),
+                          opacity: _wordVisible[i] ? 1 : 0,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Text(
+                              words[i],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
+                        );
+                      }),
+                    ),
+                  ),
+                  Padding(
+                      padding: const EdgeInsets.only(bottom: 14, top: 8),
+                      child:Text(
+                        _isRecording
+                            ? context.loc.recordingSpeakClearly
+                            : context.loc.tapMicToRecord,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.83),
+                          fontSize: 16,
                         ),
-                      ),
-                    );
-                  }),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 14, top: 8),
-                child:Text(
-                  _isRecording
-                      ? context.loc.recordingSpeakClearly
-                      : context.loc.tapMicToRecord,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.83),
-                    fontSize: 16,
-                  ),
-                )
+                      )
 
-              ),
-              if (_showTryAgain)
-                 Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: Text(
-                    context.loc.voiceNotClear,
-                    style: TextStyle(color: Colors.redAccent),
                   ),
-                ),
-              if (_isUploading)
-                const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: CircularProgressIndicator(color: Colors.purpleAccent),
-                ),
-            ],
+                  if (_showTryAgain)
+                    Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        context.loc.voiceNotClear,
+                        style: TextStyle(color: Colors.redAccent),
+                      ),
+                    ),
+                  if (_isUploading)
+                    const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(color: Colors.purpleAccent),
+                    ),
+                ],
               ),
             ),
-            if (_showMicTutorial) _buildTutorialOverlay(context, size),
+            if (_showRepeatTutorial) _buildRepeatTutorialOverlay(context),
+            if (_showMicTutorial) _buildTutorialOverlay(context),
           ],
         ),
       ),

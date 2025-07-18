@@ -84,5 +84,9 @@
   "feMale":"Female",
   "other":"Other",
   "trialExpired":"Trial Expired",
-  "hindi":"Hindi"
+  "hindi":"Hindi",
+  "nameFieldIntro":"This is your friend's name.",
+  "repeatSentenceHint":"Repeat the displayed sentence to complete all questions.",
+  "speakerListIntro":"This screen lists your registered speakers.",
+  "speakerAddIntro":"Tap Add Speaker to register a new voice."
 }
