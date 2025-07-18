@@ -58,6 +58,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   bool _userStartedSpeaking = false;
   DateTime? _lastVoiceTime;
   bool _dialogActive = false;
+  bool _showMicTutorial = false;
 
   static const int silenceThresholdMs = 700;
   static const int ignoreInitialMs = 300;
@@ -68,6 +69,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     super.initState();
     _nameController = TextEditingController(text: widget.name);
     _loadStoredEmail();
+    _checkFirstTime();
     WidgetsBinding.instance.addPostFrameCallback((_) => _askForContactName());
 
     _micPulse = AnimationController(
@@ -98,6 +100,15 @@ class _AddContactScreenState extends State<AddContactScreen>
     setState(() {
       _email = prefs.getString('email') ?? '';
     });
+  }
+
+  Future<void> _checkFirstTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shown = prefs.getBool('add_contact_tutorial_shown') ?? false;
+    if (!shown && mounted) {
+      setState(() => _showMicTutorial = true);
+      await prefs.setBool('add_contact_tutorial_shown', true);
+    }
   }
 
   void _revealWords() {
@@ -486,6 +497,59 @@ class _AddContactScreenState extends State<AddContactScreen>
     }
   }
 
+  Widget _buildTutorialOverlay(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showMicTutorial = false),
+        child: Container(
+          color: Colors.black87.withOpacity(0.7),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 110,
+                  height: 110,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white24,
+                  ),
+                  child: const Icon(Icons.mic, color: Colors.white, size: 60),
+                ),
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    context.loc.tapMicToStart,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Text(
+                    context.loc.tapMicToRecord,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 16,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final words = _sentences[_currentIndex].split(' ');
@@ -543,8 +607,10 @@ class _AddContactScreenState extends State<AddContactScreen>
             stops: const [0.1, 0.7, 1.0],
           ),
         ),
-        child: SafeArea(
-          child: Column(
+        child: Stack(
+          children: [
+            SafeArea(
+              child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 16),
@@ -758,7 +824,10 @@ class _AddContactScreenState extends State<AddContactScreen>
                   child: CircularProgressIndicator(color: Colors.purpleAccent),
                 ),
             ],
-          ),
+              ),
+            ),
+            if (_showMicTutorial) _buildTutorialOverlay(context),
+          ],
         ),
       ),
     );
