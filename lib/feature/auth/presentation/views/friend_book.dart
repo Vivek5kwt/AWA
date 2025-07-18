@@ -724,7 +724,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
             ),
           ),
         ),
-          if (_showIntro) _buildIntroOverlay(context),
+          if (_showIntro) _buildIntroOverlay(),
         ],
       ),
     );
