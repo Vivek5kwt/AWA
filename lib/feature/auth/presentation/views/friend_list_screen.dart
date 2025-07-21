@@ -269,6 +269,7 @@ class _FriendListScreenState extends State<FriendListScreen>
           ),
         );
         await _fetchUsers();
+        _sendFriendNotification(friendEmail: u.email);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -299,8 +300,26 @@ class _FriendListScreenState extends State<FriendListScreen>
     }
   }
 
+  Future<void> _sendFriendNotification({required String friendEmail}) async {
+    try {
+      final url = Uri.parse(ApiConstants.sendFriendNotification);
+      final response = await http.post(
+        url,
+        body: {
+          'user_email': _email,
+          'friend_email': friendEmail,
+        },
+      );
+      if (response.statusCode != 200) {
+        debugPrint('Friend notification failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Friend notification error: $e');
+    }
+  }
   // Show bottom sheet with user info
   void _showUserProfileSheet(User u, List<Color> avatarColors) {
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
