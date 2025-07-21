@@ -1,9 +1,12 @@
 part of '../core/network/http_service.dart';
 abstract final class ApiConstants {
-  static const String baseUrl = "http://172.232.104.30:8000";
+  //live
+  //static const String baseUrl = "http://172.232.104.30:8000";
+  //local
+  static const String baseUrl = "http://192.168.1.20:5000";
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register _user";
-  static const String loginUser = "${_apiBaseUrl}login_user"; 
+  static const String loginUser = "${_apiBaseUrl}login_user";
   static const String socialLogin =  "${_apiBaseUrl}login_user";
   static const String registerSpeaker = "${_apiBaseUrl}register_speaker";
   static const String listSpeaker = "${_apiBaseUrl}list_speakers?email=";
@@ -18,6 +21,8 @@ abstract final class ApiConstants {
   static const String updateUserProfile = "${_apiBaseUrl}update_user_profile";
   static const String getNotification = "${_apiBaseUrl}get_notifications";
   static const String sendNotification = "${_apiBaseUrl}send_notification";
+  static const String sendFriendNotification =
+      "${_apiBaseUrl}send_friend_notification";
   static const String deleteNotification = "${_apiBaseUrl}delete_notification";
   static const String getSubPlan = "${_apiBaseUrl}get_subscription_plans";
   static const String getTransaction = "${_apiBaseUrl}get_transactions_by_email";
