@@ -493,7 +493,7 @@ class _AddContactScreenState extends State<AddContactScreen>
           );
           await Future.delayed(const Duration(milliseconds: 800));
           if (!mounted) return;
-          context.go('/speakerScreen?phoneNumber=${Uri.encodeComponent(widget.phoneNumber)}&isDarkMode=${widget.isDarkMode}');
+          context.pop(true);
         }
       } else {
         setState(() => _showTryAgain = true);

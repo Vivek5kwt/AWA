@@ -379,6 +379,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _refreshHome() async {
+    await _loadSettings();
+    await _checkTrialStatus();
+    await _checkAndUpdateSubscription();
+    await _fetchUnreadNotificationCount();
+  }
+
   Future<void> _checkFirstLaunch() async {
     final prefs = await SharedPreferences.getInstance();
     final didTutorial = prefs.getBool('didHomeTutorial') ?? false;
@@ -1704,9 +1711,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                children: [
+              child: RefreshIndicator(
+                onRefresh: _refreshHome,
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  children: [
                   GlassmorphicContainer(
                     width: double.infinity,
                     height: 200,
