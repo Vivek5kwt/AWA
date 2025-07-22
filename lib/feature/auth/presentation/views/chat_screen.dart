@@ -120,22 +120,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }) async {
     if (widget.token == null || widget.token!.isEmpty) return;
     try {
-      final url = Uri.parse('https://fcm.googleapis.com/fcm/send');
+      final url = Uri.parse(FcmConfig.functionUrl);
       final response = await http.post(
         url,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'key=${FcmConfig.serverKey}',
         },
         body: jsonEncode({
-          'to': widget.token,
-          'notification': {
-            'title': fromEmail,
-            'body': message,
-          },
-          'data': {
-            'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-          },
+          'token': widget.token,
+          'title': fromEmail,
+          'body': message,
         }),
       );
       if (response.statusCode != 200) {
