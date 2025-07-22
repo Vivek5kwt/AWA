@@ -14,3 +14,9 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+### Push Notifications
+
+This project sends FCM notifications through a Firebase Cloud Function. Deploy
+the function found in `functions/` and update `FcmConfig.functionUrl` in
+`lib/config/firebase_push.dart` with the HTTPS endpoint provided by Firebase.
