@@ -310,7 +310,6 @@ class _FriendListScreenState extends State<FriendListScreen>
           'friend_email': friendEmail,
         },
       );
-      print('sdsjdsjjh ${response.statusCode}');
       if (response.statusCode != 200) {
         debugPrint('Friend notification failed: ${response.statusCode}');
       }
@@ -443,161 +442,161 @@ class _FriendListScreenState extends State<FriendListScreen>
       body: Stack(
         children: [
           Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: gradientColors,
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  stops: const [0.1, 0.7, 1.0],
-                ),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                stops: const [0.1, 0.7, 1.0],
               ),
-              child: SafeArea(
-                child: _loading
-                    ? const Center(
-                  child: CircularProgressIndicator(color: Colors.cyanAccent),
-                )
-                    : _error != null
-                    ? Center (
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(
-                        color: Colors.redAccent, fontSize: 16),
-                  ),
-                )
-                    : RefreshIndicator(
-                  onRefresh: _fetchUsers,
-                  color: widget.isDarkMode
-                      ? Colors.cyanAccent
-                      : Colors.deepPurpleAccent,
-                  backgroundColor:
-                  widget.isDarkMode ? Colors.grey[900]! : Colors.white,
-                  edgeOffset: 20,
-                  child: _users.isEmpty
-                      ? _NoUsersWidget(isDarkMode: widget.isDarkMode)
-                      : ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(
-                        top: 12, left: 18, right: 18, bottom: 40),
-                    itemCount: _users.length,
-                    itemBuilder: (_, i) {
-                      final u = _users[i];
-                      final avatarColors = _avatarGradients[i % _avatarGradients.length];
-                      final anim = Tween<Offset>(
-                          begin: Offset(0, 0.18 * (i + 1)),
-                          end: Offset.zero)
-                          .animate(CurvedAnimation(
-                        parent: _listAnimController,
-                        curve: Interval(0.06 * i, 0.4 + 0.11 * i,
-                            curve: Curves.easeOut),
-                      ));
-                      return SlideTransition(
-                        position: anim,
-                        child: FadeTransition(
-                          opacity: _listAnimController,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 7),
-                            child: GestureDetector(
-                              onTap: () => _showUserProfileSheet(u, avatarColors),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(20),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: widget.isDarkMode
-                                          ? Colors.black.withOpacity(0.14)
-                                          : Colors.black.withOpacity(0.11),
-                                      blurRadius: 12,
-                                      offset: Offset(0, 7),
-                                    ),
-                                  ],
-                                  color: widget.isDarkMode
-                                      ? Colors.white.withOpacity(0.07)
-                                      : Colors.white.withOpacity(0.16),
-                                  border: Border(
-                                    left: BorderSide(
-                                      color: avatarColors[0],
-                                      width: 7,
-                                    ),
-                                  ),
+            ),
+            child: SafeArea(
+              child: _loading
+                  ? const Center(
+                child: CircularProgressIndicator(color: Colors.cyanAccent),
+              )
+                  : _error != null
+              ? Center (
+            child: Text(
+              _error!,
+              style: const TextStyle(
+                  color: Colors.redAccent, fontSize: 16),
+            ),
+          )
+              : RefreshIndicator(
+            onRefresh: _fetchUsers,
+            color: widget.isDarkMode
+                ? Colors.cyanAccent
+                : Colors.deepPurpleAccent,
+            backgroundColor:
+            widget.isDarkMode ? Colors.grey[900]! : Colors.white,
+            edgeOffset: 20,
+            child: _users.isEmpty
+                ? _NoUsersWidget(isDarkMode: widget.isDarkMode)
+                : ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(
+                  top: 12, left: 18, right: 18, bottom: 40),
+              itemCount: _users.length,
+              itemBuilder: (_, i) {
+                final u = _users[i];
+                final avatarColors = _avatarGradients[i % _avatarGradients.length];
+                final anim = Tween<Offset>(
+                    begin: Offset(0, 0.18 * (i + 1)),
+                    end: Offset.zero)
+                    .animate(CurvedAnimation(
+                  parent: _listAnimController,
+                  curve: Interval(0.06 * i, 0.4 + 0.11 * i,
+                      curve: Curves.easeOut),
+                ));
+                return SlideTransition(
+                  position: anim,
+                  child: FadeTransition(
+                    opacity: _listAnimController,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 7),
+                      child: GestureDetector(
+                        onTap: () => _showUserProfileSheet(u, avatarColors),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: widget.isDarkMode
+                                    ? Colors.black.withOpacity(0.14)
+                                    : Colors.black.withOpacity(0.11),
+                                blurRadius: 12,
+                                offset: Offset(0, 7),
+                              ),
+                            ],
+                            color: widget.isDarkMode
+                                ? Colors.white.withOpacity(0.07)
+                                : Colors.white.withOpacity(0.16),
+                            border: Border(
+                              left: BorderSide(
+                                color: avatarColors[0],
+                                width: 7,
+                              ),
+                            ),
+                          ),
+                          child: ListTile(
+                            contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            leading: Container(
+                              width: 49,
+                              height: 49,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: avatarColors,
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
-                                child: ListTile(
-                                  contentPadding:
-                                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  leading: Container(
-                                    width: 49,
-                                    height: 49,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      gradient: LinearGradient(
-                                        colors: avatarColors,
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: avatarColors[1].withOpacity(0.12),
-                                          blurRadius: 10,
-                                          offset: Offset(0, 4),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        u.name.isNotEmpty
-                                            ? u.name[0].toUpperCase()
-                                            : '?',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 23,
-                                          shadows: [
-                                            Shadow(
-                                              color: Colors.black26,
-                                              blurRadius: 3,
-                                              offset: Offset(1, 2),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: avatarColors[1].withOpacity(0.12),
+                                    blurRadius: 10,
+                                    offset: Offset(0, 4),
                                   ),
-                                  title: Text(
-                                    u.name,
-                                    style: TextStyle(
-                                      color: widget.isDarkMode
-                                          ? Colors.white
-                                          : Colors.black87,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 18.5,
-                                    ),
-                                  ),
-
-                                  trailing: SizedBox(
-                                    width: 98,
-                                    child: IconButton(
-                                      icon: Icon(
-                                        Icons.person_add_alt_1_rounded,
-                                        color: widget.isDarkMode
-                                            ? Colors.cyanAccent
-                                            : Colors.deepPurpleAccent,
-                                        size: 28,
+                                ],
+                              ),
+                              child: Center(
+                                child: Text(
+                                  u.name.isNotEmpty
+                                      ? u.name[0].toUpperCase()
+                                      : '?',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 23,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black26,
+                                        blurRadius: 3,
+                                        offset: Offset(1, 2),
                                       ),
-                                      onPressed: () =>
-                                          _sendFriendRequest(u),
-                                      tooltip: 'Add Friend',
-                                    ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ),
+                            title: Text(
+                              u.name,
+                              style: TextStyle(
+                                color: widget.isDarkMode
+                                    ? Colors.white
+                                    : Colors.black87,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 18.5,
+                              ),
+                            ),
+
+                            trailing: SizedBox(
+                              width: 98,
+                              child: IconButton(
+                                icon: Icon(
+                                  Icons.person_add_alt_1_rounded,
+                                  color: widget.isDarkMode
+                                      ? Colors.cyanAccent
+                                      : Colors.deepPurpleAccent,
+                                  size: 28,
+                                ),
+                                onPressed: () =>
+                                    _sendFriendRequest(u),
+                                tooltip: 'Add Friend',
+                              ),
+                            ),
                           ),
                         ),
-                      );
-                    },
+                      ),
+                    ),
                   ),
-                ),
-              ),),
-              if (_showIntro) _buildIntroOverlay(),
+                );
+              },
+            ),
+            ),
+          ),
+          if (_showIntro) _buildIntroOverlay(),
         ],
       ),
     );
