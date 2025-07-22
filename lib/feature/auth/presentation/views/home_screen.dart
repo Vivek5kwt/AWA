@@ -112,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   DateTime? _trialExpiresAt;
   String? _trialMessage;
   bool _trialLoading = true;
+  int _unreadNotificationCount = 0;
 
   @override
   void initState() {
@@ -122,6 +123,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _loadSettings().then((_) async {
       await _checkTrialStatus();
       _checkAndUpdateSubscription();
+      await _fetchUnreadNotificationCount();
       _runItemAnimation();
     });
 
@@ -355,6 +357,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     } catch (e) {
       debugPrint('Subscription check failed: $e');
+    }
+  }
+
+  Future<void> _fetchUnreadNotificationCount() async {
+    if (_email.isEmpty) return;
+    try {
+      final uri = Uri.parse(ApiConstants.getNotificationCount)
+          .replace(queryParameters: {'email': _email});
+      final resp = await http.get(uri);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body);
+        if (mounted) {
+          setState(() =>
+              _unreadNotificationCount =
+                  data['unread_notification_count'] ?? 0);
+        }
+      }
+    } catch (_) {
+      // ignore errors silently
     }
   }
 
@@ -1411,22 +1432,49 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       actions: [
                         Padding(
                           padding: const EdgeInsets.only(right: 10),
-                          child: IconButton(
-                            icon: Icon(
-                              Icons.notifications_none,
-                              color: _isDarkMode
-                                  ? Colors.cyanAccent
-                                  : Colors.deepPurple,
-                              size: 27,
-                            ),
-                            onPressed: () {
-                              context.pushNamed(
-                                'notificationScreen',
-                                extra: {'isDarkMode': _isDarkMode},
-                              );
-                            },
-                            splashRadius: 26,
-                            tooltip: 'Notifications',
+                          child: Stack(
+                            children: [
+                              IconButton(
+                                icon: Icon(
+                                  Icons.notifications_none,
+                                  color: _isDarkMode
+                                      ? Colors.cyanAccent
+                                      : Colors.deepPurple,
+                                  size: 27,
+                                ),
+                                onPressed: () async {
+                                  await context.pushNamed(
+                                    'notificationScreen',
+                                    extra: {'isDarkMode': _isDarkMode},
+                                  );
+                                  _fetchUnreadNotificationCount();
+                                },
+                                splashRadius: 26,
+                                tooltip: 'Notifications',
+                              ),
+                              if (_unreadNotificationCount > 0)
+                                Positioned(
+                                  right: 4,
+                                  top: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.redAccent,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    constraints:
+                                        const BoxConstraints(minWidth: 16, minHeight: 16),
+                                    child: Text(
+                                      '$_unreadNotificationCount',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ],
