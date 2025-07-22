@@ -9,6 +9,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
+class FriendData {
+  final String email;
+  final String? token;
+
+  FriendData({required this.email, this.token});
+}
+
 class FriendBookScreen extends StatefulWidget {
   final String phoneNumber;
   final bool isDarkMode;
@@ -27,7 +34,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
     with TickerProviderStateMixin {
   bool _loading = true;
   String? _error;
-  List<String> _friendEmails = [];
+  List<FriendData> _friends = [];
   String _email = '';
   bool _showIntro = false;
 
@@ -85,7 +92,7 @@ class _FriendBookScreenState extends State<FriendBookScreen>
     setState(() {
       _loading = true;
       _error = null;
-      _friendEmails = [];
+      _friends = [];
     });
 
     try {
@@ -106,15 +113,18 @@ class _FriendBookScreenState extends State<FriendBookScreen>
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         final rawList = data['friends'] as List<dynamic>? ?? [];
-        List<String> parsedEmails = [];
+        List<FriendData> parsed = [];
         for (var entry in rawList) {
           final map = entry as Map<String, dynamic>;
           final email = (map['email'] ?? '').toString().trim();
-          if (email.isNotEmpty) parsedEmails.add(email);
+          final token = map['fcm_token']?.toString();
+          if (email.isNotEmpty) {
+            parsed.add(FriendData(email: email, token: token));
+          }
         }
-        print('Loaded friend emails: $parsedEmails');
+        print('Loaded friends: \$parsed');
         setState(() {
-          _friendEmails = parsedEmails;
+          _friends = parsed;
         });
         _listAnimController.forward(from: 0);
       } else {
@@ -543,15 +553,16 @@ class _FriendBookScreenState extends State<FriendBookScreen>
                 ? Colors.grey[900]!
                 : Colors.white,
             edgeOffset: 20,
-            child: _friendEmails.isEmpty
+            child: _friends.isEmpty
                 ? _NoFriendsWidget(isDarkMode: widget.isDarkMode)
                 : ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(
                   top: 12, left: 18, right: 18, bottom: 40),
-              itemCount: _friendEmails.length,
+              itemCount: _friends.length,
               itemBuilder: (_, i) {
-                final friendEmail = _friendEmails[i];
+                final friendData = _friends[i];
+                final friendEmail = friendData.email;
                 final displayName = friendEmail.split('@').first;
                 final avatarColors =
                 _avatarGradients[i % _avatarGradients.length];
@@ -692,9 +703,9 @@ class _FriendBookScreenState extends State<FriendBookScreen>
                                       'chatList',
                                       extra: {
                                         'name': displayName,
-                                        'phoneNumber':
-                                        widget.phoneNumber,
+                                        'phoneNumber': widget.phoneNumber,
                                         'id': friendEmail,
+                                        'token': friendData.token ?? '',
                                         friendEmail: friendEmail,
                                         'isDarkMode': _isDarkMode.toString()
 

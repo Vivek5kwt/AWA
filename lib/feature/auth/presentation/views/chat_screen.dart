@@ -8,12 +8,14 @@ import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/scheduler.dart';
+import '../../../config/firebase_push.dart';
 import '../../../../core/network/http_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final String name;
   final String phoneNumber;
   final String id;
+  final String? token;
   final bool isDarkMode;
 
   const ChatScreen({
@@ -21,6 +23,7 @@ class ChatScreen extends StatefulWidget {
     required this.name,
     required this.phoneNumber,
     required this.id,
+    this.token,
     this.isDarkMode = false,
   }) : super(key: key);
 
@@ -107,7 +110,6 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     _sendNotification(
       fromEmail: _userEmail!,
-      toEmail: widget.id,
       message: text,
     );
     _scrollToLatest();
@@ -115,18 +117,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _sendNotification({
     required String fromEmail,
-    required String toEmail,
     required String message,
   }) async {
+    if (widget.token == null || widget.token!.isEmpty) return;
     try {
-      final url = Uri.parse(ApiConstants.sendNotification);
+      final url = Uri.parse('https://fcm.googleapis.com/fcm/send');
       final response = await http.post(
         url,
-        body: {
-          'from_email': fromEmail,
-          'to_email': toEmail,
-          'message': message,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'key=${FcmConfig.serverKey}',
         },
+        body: jsonEncode({
+          'to': widget.token,
+          'notification': {
+            'title': fromEmail,
+            'body': message,
+          },
+          'data': {
+            'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+          },
+        }),
       );
       if (response.statusCode != 200) {
         debugPrint('Notification failed: ${response.statusCode}');
