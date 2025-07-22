@@ -107,11 +107,15 @@ class _ChatScreenState extends State<ChatScreen> {
       'receiver': widget.id,
       'timestamp': FieldValue.serverTimestamp(),
     });
-    _sendNotification(
-      fromEmail: 'vivek@example.com',
-      message: 'Hello there!',
-      receiverToken: '<your friend’s FCM token>',
-    );
+    if (widget.token != null && widget.token!.isNotEmpty) {
+      _sendNotification(
+        fromEmail: _userEmail!,
+        message: text,
+        receiverToken: widget.token!,
+      );
+    } else {
+      debugPrint('❗ Receiver FCM token missing, notification not sent');
+    }
 
     _scrollToLatest();
   }
