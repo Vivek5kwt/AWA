@@ -726,38 +726,59 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
           Tooltip(
             message: "Chat History",
             verticalOffset: 30,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.85),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            textStyle: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
             child: Container(
               margin: const EdgeInsets.only(right: 10),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(18),
                 gradient: LinearGradient(
                   colors: widget.isDarkMode
-                      ? [Colors.cyanAccent.withOpacity(0.14), Colors.blueAccent.withOpacity(0.13)]
-                      : [Colors.deepPurpleAccent.withOpacity(0.11), Colors.amber.withOpacity(0.14)],
+                      ? [
+                    Colors.white.withOpacity(0.06),
+                    Colors.blueGrey.withOpacity(0.14)
+                  ]
+                      : [
+                    Colors.blueAccent.withOpacity(0.08),
+                    Colors.purpleAccent.withOpacity(0.09),
+                  ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: widget.isDarkMode
-                        ? Colors.cyanAccent.withOpacity(0.13)
-                        : Colors.deepPurpleAccent.withOpacity(0.07),
-                    blurRadius: 10,
-                    offset: Offset(0, 3),
+                        ? Colors.black.withOpacity(0.28)
+                        : Colors.blueGrey.withOpacity(0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
                   ),
                 ],
+                border: Border.all(
+                  color: widget.isDarkMode
+                      ? Colors.white.withOpacity(0.10)
+                      : Colors.blueGrey.withOpacity(0.09),
+                  width: 1.2,
+                ),
               ),
               child: IconButton(
                 icon: Icon(
                   Icons.history_edu_rounded,
-                  color: widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
-                  size: 27,
+                  color: Colors.white,
+                  size: 28,
                   shadows: [
                     Shadow(
                       color: widget.isDarkMode
-                          ? Colors.cyanAccent.withOpacity(0.22)
-                          : Colors.deepPurpleAccent.withOpacity(0.11),
-                      blurRadius: 9,
+                          ? Colors.cyanAccent.withOpacity(0.35)
+                          : Colors.blueAccent.withOpacity(0.24),
+                      blurRadius: 11,
                     ),
                   ],
                 ),
@@ -772,7 +793,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                     ),
                   );
                 },
-                splashRadius: 26,
+                splashRadius: 27,
+                tooltip: "Chat History",
               ),
             ),
           ),
