@@ -1,0 +1,11 @@
+{
+  "name": "firebase-functions",
+  "description": "Cloud Functions for FCM",
+  "dependencies": {
+    "firebase-admin": "^11.10.1",
+    "firebase-functions": "^4.4.1"
+  },
+  "engines": {
+    "node": "18"
+  }
+}
