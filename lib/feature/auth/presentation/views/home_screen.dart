@@ -685,6 +685,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await prefs.setBool('isSubscribed', true);
     setState(() => _isSubscribed = true);
     await _checkAndUpdateSubscription(showSnackBar: true);
+    await _checkTrialStatus();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -1044,6 +1045,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     _isSubscribed = true;
                   });
                   await _checkAndUpdateSubscription(showSnackBar: true);
+                  await _checkTrialStatus();
                   Navigator.of(context).pop();
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
