@@ -120,6 +120,7 @@ final GoRouter appRouter = GoRouter(
           name: args['name'] ?? '',
           phoneNumber: args['phoneNumber'] ?? '',
           id: args['id'] ?? '',
+          token: args['token'] as String?,
           isDarkMode: isDarkMode,
         );
       },
