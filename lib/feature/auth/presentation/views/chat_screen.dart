@@ -8,8 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/scheduler.dart';
-import '../../../config/firebase_push.dart';
-import '../../../../core/network/http_service.dart';
+import '../../../../config/firebase_push.dart';
 
 class ChatScreen extends StatefulWidget {
   final String name;
