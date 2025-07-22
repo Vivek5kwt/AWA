@@ -595,7 +595,7 @@ class _FriendListScreenState extends State<FriendListScreen>
               },
             ),
             ),
-          ),
+          ),),
           if (_showIntro) _buildIntroOverlay(),
         ],
       ),
