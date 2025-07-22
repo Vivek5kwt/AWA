@@ -108,42 +108,40 @@ class _ChatScreenState extends State<ChatScreen> {
       'timestamp': FieldValue.serverTimestamp(),
     });
     _sendNotification(
-      fromEmail: _userEmail!,
-      message: text,
+      fromEmail: 'vivek@example.com',
+      message: 'Hello there!',
+      receiverToken: '<your friend’s FCM token>',
     );
+
     _scrollToLatest();
   }
 
   Future<void> _sendNotification({
     required String fromEmail,
     required String message,
+    required String receiverToken,
   }) async {
-    if (widget.token == null || widget.token!.isEmpty) {
-      debugPrint('Notification skipped: missing token');
-      return;
-    }
     try {
-      final url = Uri.parse(FcmConfig.functionUrl);
       final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse(FcmConfig.functionUrl),
+        headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'token': widget.token,
+          'token': receiverToken,
           'title': fromEmail,
           'body': message,
         }),
       );
+
       if (response.statusCode == 200) {
-        debugPrint('Notification sent: ${response.body}');
+        debugPrint('✅ Notification sent: ${response.body}');
       } else {
-        debugPrint('Notification failed: ${response.statusCode} - ${response.body}');
+        debugPrint('❌ Notification failed: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
-      debugPrint('Notification error: $e');
+      debugPrint('❗ Notification error: $e');
     }
   }
+
 
   void _scrollToLatest() {
     SchedulerBinding.instance.addPostFrameCallback((_) {
