@@ -118,7 +118,10 @@ class _ChatScreenState extends State<ChatScreen> {
     required String fromEmail,
     required String message,
   }) async {
-    if (widget.token == null || widget.token!.isEmpty) return;
+    if (widget.token == null || widget.token!.isEmpty) {
+      debugPrint('Notification skipped: missing token');
+      return;
+    }
     try {
       final url = Uri.parse(FcmConfig.functionUrl);
       final response = await http.post(
@@ -132,8 +135,10 @@ class _ChatScreenState extends State<ChatScreen> {
           'body': message,
         }),
       );
-      if (response.statusCode != 200) {
-        debugPrint('Notification failed: ${response.statusCode}');
+      if (response.statusCode == 200) {
+        debugPrint('Notification sent: ${response.body}');
+      } else {
+        debugPrint('Notification failed: ${response.statusCode} - ${response.body}');
       }
     } catch (e) {
       debugPrint('Notification error: $e');
