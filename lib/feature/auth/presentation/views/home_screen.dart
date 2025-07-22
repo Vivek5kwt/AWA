@@ -120,11 +120,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _checkFirstLaunch();
     final menuButtonsCount = 6;
     _itemVisible = List<bool>.filled(3 + menuButtonsCount, false);
-    _loadSettings().then((_) async {
-      await _checkTrialStatus();
-      _checkAndUpdateSubscription();
-      await _fetchUnreadNotificationCount();
+    _loadSettings().then((_) {
       _runItemAnimation();
+      _checkTrialStatus();
+      _checkAndUpdateSubscription();
+      _fetchUnreadNotificationCount();
     });
 
     _carouselController = PageController(initialPage: 0);
