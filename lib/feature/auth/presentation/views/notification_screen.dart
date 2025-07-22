@@ -58,6 +58,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final prefs = await SharedPreferences.getInstance();
     _userEmail = prefs.getString('email') ?? '';
     await _fetchNotifications();
+    await _markNotificationsAsRead();
   }
 
   void showAccountDeletedDialog() {
@@ -248,6 +249,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
       );
     } finally {
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _markNotificationsAsRead() async {
+    try {
+      final uri = Uri.parse(ApiConstants.notificationReaded)
+          .replace(queryParameters: {'email': _userEmail});
+      await http.post(uri);
+    } catch (_) {
+      // Ignore errors
     }
   }
 
