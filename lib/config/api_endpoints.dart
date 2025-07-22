@@ -26,6 +26,8 @@ abstract final class ApiConstants {
   static const String deleteNotification = "${_apiBaseUrl}delete_notification";
   static const String getNotificationCount =
       "${_apiBaseUrl}get_notification_count";
+  static const String notificationReaded =
+      "${_apiBaseUrl}notification_readed";
   static const String getSubPlan = "${_apiBaseUrl}get_subscription_plans";
   static const String getTransaction = "${_apiBaseUrl}get_transactions_by_email";
 }
