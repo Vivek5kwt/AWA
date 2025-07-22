@@ -236,8 +236,17 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
 
     return response;
   }
-  void _goToAddSpeaker() {
-    context.push('/addContact', extra: {'phoneNumber': widget.phoneNumber, 'isDarkMode': widget.isDarkMode});
+  Future<void> _goToAddSpeaker() async {
+    final result = await context.push<bool>(
+      '/addContact',
+      extra: {
+        'phoneNumber': widget.phoneNumber,
+        'isDarkMode': widget.isDarkMode,
+      },
+    );
+    if (result == true) {
+      await _fetchSpeakers();
+    }
   }
   Future<void> _deleteSpeaker(Speaker s) async {
     final endpoint = Uri.parse(ApiConstants.deleteSpeaker);
@@ -500,9 +509,10 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                 edgeOffset: 20,
                 child: _speakers.isEmpty
                     ? _NoSpeakersWidget(
-                  isDarkMode: widget.isDarkMode,
-                  phoneNumber: widget.phoneNumber,
-                )
+                        isDarkMode: widget.isDarkMode,
+                        phoneNumber: widget.phoneNumber,
+                        onAdd: _goToAddSpeaker,
+                      )
                     : ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(top: 12, left: 18, right: 18, bottom: 40),
@@ -743,9 +753,11 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
 class _NoSpeakersWidget extends StatelessWidget {
   final bool isDarkMode;
   final String phoneNumber;
+  final Future<void> Function() onAdd;
   const _NoSpeakersWidget({
     required this.isDarkMode,
     required this.phoneNumber,
+    required this.onAdd,
   });
 
   @override
@@ -796,10 +808,7 @@ class _NoSpeakersWidget extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                   color: isDarkMode ? Colors.black : Colors.white),
             ),
-            onPressed: () {
-              context.push('/addContact',
-                  extra: {'phoneNumber': phoneNumber, 'isDarkMode': isDarkMode});
-            },
+            onPressed: onAdd,
           ),
         ],
       ),
