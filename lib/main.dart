@@ -7,6 +7,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:showcaseview/showcaseview.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'feature/common_widgets/custom_toast.dart';
 import 'core/utils/routing/routes_generator.dart';
 
 Future<void> main() async {
@@ -66,11 +68,20 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late Locale _locale;
+  late final StreamSubscription<ConnectivityResult> _connectivitySubscription;
 
   @override
   void initState() {
     super.initState();
     _locale = widget.initialLocale;
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((result) {
+      if (result == ConnectivityResult.none) {
+        toast(
+            msg: "Please check your Internet Connection",
+            isError: true);
+      }
+    });
   }
 
   void setLocale(Locale locale) async {
@@ -116,5 +127,11 @@ class _MyAppState extends State<MyApp> {
         },
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _connectivitySubscription.cancel();
+    super.dispose();
   }
 }
