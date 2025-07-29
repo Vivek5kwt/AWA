@@ -55,7 +55,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   final FlutterTts _flutterTts = FlutterTts();
 
-  final String _appLanguageCode = 'en';
 
   bool _speakOnMeeting = true;
 
@@ -318,14 +317,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
 
-  bool _isTextInLanguage(String text, String languageCode) {
-    if (languageCode == 'en') {
-      final onlyLetters =
-      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
-      return onlyLetters.length > text.length * 0.6;
-    }
-    return true;
-  }
 
   void _resetSilenceTimer() {
     _silenceTimer?.cancel();
@@ -540,7 +531,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         return;
       }
       if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final body = jsonDecode(utf8.decode(response.bodyBytes))
+            as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
 
         setState(() {
@@ -551,7 +543,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             final text = data['spoken_text'] as String? ?? '';
             final time = TimeOfDay.now().format(context);
 
-            if (text.trim().isEmpty || !_isTextInLanguage(text, _appLanguageCode)) {
+            if (text.trim().isEmpty) {
               continue;
             }
 
