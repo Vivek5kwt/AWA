@@ -55,7 +55,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   final FlutterTts _flutterTts = FlutterTts();
 
-  final String _appLanguageCode = 'en';
 
   bool _speakOnMeeting = true;
 
@@ -174,6 +173,90 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   String _capitalize(String s) {
     if (s.isEmpty) return s;
     return s[0].toUpperCase() + s.substring(1);
+  }
+
+  bool _containsHindi(String text) {
+    return RegExp(r'[\u0900-\u097F]').hasMatch(text);
+  }
+
+  String _toHinglish(String text) {
+    const Map<String, String> map = {
+      'अ': 'a',
+      'आ': 'aa',
+      'इ': 'i',
+      'ई': 'ee',
+      'उ': 'u',
+      'ऊ': 'oo',
+      'ऋ': 'ri',
+      'ए': 'e',
+      'ऐ': 'ai',
+      'ओ': 'o',
+      'औ': 'au',
+      'क': 'k',
+      'ख': 'kh',
+      'ग': 'g',
+      'घ': 'gh',
+      'ङ': 'n',
+      'च': 'ch',
+      'छ': 'chh',
+      'ज': 'j',
+      'झ': 'jh',
+      'ञ': 'n',
+      'ट': 't',
+      'ठ': 'th',
+      'ड': 'd',
+      'ढ': 'dh',
+      'ण': 'n',
+      'त': 't',
+      'थ': 'th',
+      'द': 'd',
+      'ध': 'dh',
+      'न': 'n',
+      'प': 'p',
+      'फ': 'ph',
+      'ब': 'b',
+      'भ': 'bh',
+      'म': 'm',
+      'य': 'y',
+      'र': 'r',
+      'ल': 'l',
+      'व': 'v',
+      'श': 'sh',
+      'ष': 'sh',
+      'स': 's',
+      'ह': 'h',
+      'ा': 'aa',
+      'ि': 'i',
+      'ी': 'ee',
+      'ु': 'u',
+      'ू': 'oo',
+      'ृ': 'ri',
+      'े': 'e',
+      'ै': 'ai',
+      'ो': 'o',
+      'ौ': 'au',
+      'ं': 'n',
+      'ँ': 'n',
+      'ः': 'h',
+      '़': '',
+      '्': '',
+      '०': '0',
+      '१': '1',
+      '२': '2',
+      '३': '3',
+      '४': '4',
+      '५': '5',
+      '६': '6',
+      '७': '7',
+      '८': '8',
+      '९': '9',
+    };
+    final buffer = StringBuffer();
+    for (final codeUnit in text.runes) {
+      final ch = String.fromCharCode(codeUnit);
+      buffer.write(map[ch] ?? ch);
+    }
+    return buffer.toString();
   }
 
   String _generateTempFilePath() {
@@ -318,14 +401,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
 
-  bool _isTextInLanguage(String text, String languageCode) {
-    if (languageCode == 'en') {
-      final onlyLetters =
-      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
-      return onlyLetters.length > text.length * 0.6;
-    }
-    return true;
-  }
 
   void _resetSilenceTimer() {
     _silenceTimer?.cancel();
@@ -540,7 +615,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         return;
       }
       if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final body = jsonDecode(utf8.decode(response.bodyBytes))
+            as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
 
         setState(() {
@@ -548,10 +624,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             final key = (speakerEntry as Map<String, dynamic>).keys.first;
             final data = speakerEntry[key] as Map<String, dynamic>;
             final name = data['name'] as String? ?? 'Unknown';
-            final text = data['spoken_text'] as String? ?? '';
+            final rawText = data['spoken_text'] as String? ?? '';
+            final text = _containsHindi(rawText) ? _toHinglish(rawText) : rawText;
             final time = TimeOfDay.now().format(context);
 
-            if (text.trim().isEmpty || !_isTextInLanguage(text, _appLanguageCode)) {
+            if (text.trim().isEmpty) {
               continue;
             }
 
