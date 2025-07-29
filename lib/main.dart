@@ -10,7 +10,7 @@ import 'package:showcaseview/showcaseview.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'feature/common_widgets/custom_toast.dart';
 import 'core/utils/routing/routes_generator.dart';
-
+import 'dart:async';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
