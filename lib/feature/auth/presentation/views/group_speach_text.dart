@@ -175,6 +175,105 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return s[0].toUpperCase() + s.substring(1);
   }
 
+  bool _containsHindi(String text) {
+    return RegExp(r'[\u0900-\u097F]').hasMatch(text);
+  }
+
+  String _toHinglish(String text) {
+    const Map<String, String> map = {
+      'अ': 'a',
+      'आ': 'aa',
+      'इ': 'i',
+      'ई': 'ee',
+      'उ': 'u',
+      'ऊ': 'oo',
+      'ऋ': 'ri',
+      'ए': 'e',
+      'ऐ': 'ai',
+      'ओ': 'o',
+      'औ': 'au',
+      'क': 'k',
+      'ख': 'kh',
+      'ग': 'g',
+      'घ': 'gh',
+      'ङ': 'n',
+      'च': 'ch',
+      'छ': 'chh',
+      'ज': 'j',
+      'झ': 'jh',
+      'ञ': 'n',
+      'ट': 't',
+      'ठ': 'th',
+      'ड': 'd',
+      'ढ': 'dh',
+      'ण': 'n',
+      'त': 't',
+      'थ': 'th',
+      'द': 'd',
+      'ध': 'dh',
+      'न': 'n',
+      'प': 'p',
+      'फ': 'ph',
+      'ब': 'b',
+      'भ': 'bh',
+      'म': 'm',
+      'य': 'y',
+      'र': 'r',
+      'ल': 'l',
+      'व': 'v',
+      'श': 'sh',
+      'ष': 'sh',
+      'स': 's',
+      'ह': 'h',
+      'ा': 'aa',
+      'ि': 'i',
+      'ी': 'ee',
+      'ु': 'u',
+      'ू': 'oo',
+      'ृ': 'ri',
+      'े': 'e',
+      'ै': 'ai',
+      'ो': 'o',
+      'ौ': 'au',
+      'ं': 'n',
+      'ँ': 'n',
+      'ः': 'h',
+      '़': '',
+      '्': '',
+      '०': '0',
+      '१': '1',
+      '२': '2',
+      '३': '3',
+      '४': '4',
+      '५': '5',
+      '६': '6',
+      '७': '7',
+      '८': '8',
+      '९': '9',
+    };
+    final buffer = StringBuffer();
+    for (final codeUnit in text.runes) {
+      final ch = String.fromCharCode(codeUnit);
+      buffer.write(map[ch] ?? ch);
+    }
+    return buffer.toString();
+  }
+
+  String _detectLanguage(String text) {
+    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(text)) return 'pa-IN';
+    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'gu-IN';
+    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'ta-IN';
+    if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'bn-IN';
+    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'Urdu';
+    if (RegExp(r'[\u0900-\u097F]').hasMatch(text)) {
+      if (RegExp(r'[\u0933\u0931\u0934\u0972\u0911\u090D]').hasMatch(text)) {
+        return 'Marathi';
+      }
+      return 'hi-IN';
+    }
+    return 'en';
+  }
+
   String _generateTempFilePath() {
     final tempDir = Directory.systemTemp;
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
@@ -350,7 +449,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       ),
     );
   }
-
   void _scrollToBottom({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -379,8 +477,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final storedEmail = prefs.getString('email') ?? '';
 
     Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label',
+      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=hi-IN',
     );
+
     void showAccountDeletedDialog() {
       showGeneralDialog(
         context: context,
@@ -413,7 +512,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                         ),
                         const SizedBox(height: 20),
                         Text(
-                          "Your account has been blocked",
+                          "Your account has been blocked",  
                           style: TextStyle(
                             color: widget.isDarkMode
                                 ? Colors.cyanAccent
@@ -540,8 +639,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             final key = (speakerEntry as Map<String, dynamic>).keys.first;
             final data = speakerEntry[key] as Map<String, dynamic>;
             final name = data['name'] as String? ?? 'Unknown';
-            final text = data['spoken_text'] as String? ?? '';
+            final rawText = data['spoken_text'] as String? ?? '';
+            final language = _detectLanguage(rawText);
+            final text = _containsHindi(rawText) ? _toHinglish(rawText) : rawText;
             final time = TimeOfDay.now().format(context);
+
+            debugPrint('Label \$label language: $language');
+            _sendLanguageForLabel(label, language);
 
             if (text.trim().isEmpty) {
               continue;
@@ -553,6 +657,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               'time': time,
               'isMe': false,
               'spoken': false,
+              'language': language,
               'audioLabel': label,
             });
             _latestSentence = text;
@@ -641,6 +746,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         _messages[index]['spoken'] = true;
       });
     }
+  }
+
+  Future<void> _sendLanguageForLabel(int label, String language) async {
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('email') ?? '';
+    final uri = Uri.parse(
+        '${ApiConstants.baseUrl}/identify_speaker?email=$email&label=$label&language=$language');
+    print('geetetet $uri');
+    try {
+      await http.post(uri);
+    } catch (_) {}
   }
 
   Future<void> _saveCurrentMeetingToFirestore() async {
