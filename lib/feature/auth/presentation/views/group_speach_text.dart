@@ -62,6 +62,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _isApiProcessing = false;
   int _audioLabel = 0;
 
+  String _currentLanguage = 'en';
+
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
   bool _shouldAutoscroll = true;
@@ -477,7 +479,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final storedEmail = prefs.getString('email') ?? '';
 
     Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=hi-IN',
+      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$_currentLanguage',
     );
 
     void showAccountDeletedDialog() {
@@ -756,6 +758,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     print('geetetet $uri');
     try {
       await http.post(uri);
+      _currentLanguage = language;
     } catch (_) {}
   }
 
