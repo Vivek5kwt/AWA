@@ -62,6 +62,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _isApiProcessing = false;
   int _audioLabel = 0;
 
+  String _currentLanguage = 'en';
+
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
   bool _shouldAutoscroll = true;
@@ -176,7 +178,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   bool _containsHindi(String text) {
-    return RegExp(r'[\u0900-\u097F]').hasMatch(text);
+    return text.runes.any((c) => c >= 0x0900 && c <= 0x097F);
   }
 
   String _toHinglish(String text) {
@@ -260,18 +262,22 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   String _detectLanguage(String text) {
-    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(text)) return 'Punjabi';
-    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'Gujarati';
-    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'Tamil';
-    if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'Bengali';
-    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'Urdu';
-    if (RegExp(r'[\u0900-\u097F]').hasMatch(text)) {
-      if (RegExp(r'[\u0933\u0931\u0934\u0972\u0911\u090D]').hasMatch(text)) {
-        return 'Marathi';
+    bool containsRange(int start, int end) =>
+        text.runes.any((c) => c >= start && c <= end);
+
+    if (containsRange(0x0A00, 0x0A7F)) return 'pa-IN';
+    if (containsRange(0x0A80, 0x0AFF)) return 'gu-IN';
+    if (containsRange(0x0B80, 0x0BFF)) return 'ta-IN';
+    if (containsRange(0x0980, 0x09FF)) return 'bn-IN';
+    if (containsRange(0x0600, 0x06FF)) return 'Urdu';
+    if (containsRange(0x0900, 0x097F)) {
+      final marathiChars = [0x0933, 0x0931, 0x0934, 0x0972, 0x0911, 0x090D];
+      if (text.runes.any(marathiChars.contains)) {
+        return 'mr-IN';
       }
-      return 'Hindi';
+      return 'hi-IN';
     }
-    return 'English';
+    return 'en';
   }
 
   String _generateTempFilePath() {
@@ -478,7 +484,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final storedEmail = prefs.getString('email') ?? '';
 
     Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=Hindi',
+      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$_currentLanguage',
     );
 
     void showAccountDeletedDialog() {
@@ -757,6 +763,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     print('geetetet $uri');
     try {
       await http.post(uri);
+      _currentLanguage = language;
     } catch (_) {}
   }
 
