@@ -3,7 +3,7 @@ abstract final class ApiConstants {
   //live
  // static const String baseUrl = "http://172.232.104.30:8000";
   //local
-  static const String baseUrl = "http://192.168.1.12:5000";
+  static const String baseUrl = "http://192.168.1.15:5000";
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register _user";
   static const String loginUser = "${_apiBaseUrl}login_use  r";
