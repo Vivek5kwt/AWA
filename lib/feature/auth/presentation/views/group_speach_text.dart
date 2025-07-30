@@ -62,6 +62,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _isApiProcessing = false;
   int _audioLabel = 0;
 
+  String _currentLanguage = 'en';
+
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
   bool _shouldAutoscroll = true;
@@ -176,7 +178,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   bool _containsHindi(String text) {
-    return RegExp(r'[\u0900-\u097F]').hasMatch(text);
+    return text.runes.any((c) => c >= 0x0900 && c <= 0x097F);
   }
 
   String _toHinglish(String text) {
@@ -260,14 +262,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   String _detectLanguage(String text) {
-    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(text)) return 'pa-IN';
-    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'gu-IN';
-    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'ta-IN';
-    if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'bn-IN';
-    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'Urdu';
-    if (RegExp(r'[\u0900-\u097F]').hasMatch(text)) {
-      if (RegExp(r'[\u0933\u0931\u0934\u0972\u0911\u090D]').hasMatch(text)) {
-        return 'Marathi';
+    bool containsRange(int start, int end) =>
+        text.runes.any((c) => c >= start && c <= end);
+
+    if (containsRange(0x0A00, 0x0A7F)) return 'pa-IN';
+    if (containsRange(0x0A80, 0x0AFF)) return 'gu-IN';
+    if (containsRange(0x0B80, 0x0BFF)) return 'ta-IN';
+    if (containsRange(0x0980, 0x09FF)) return 'bn-IN';
+    if (containsRange(0x0600, 0x06FF)) return 'Urdu';
+    if (containsRange(0x0900, 0x097F)) {
+      final marathiChars = [0x0933, 0x0931, 0x0934, 0x0972, 0x0911, 0x090D];
+      if (text.runes.any(marathiChars.contains)) {
+        return 'mr-IN';
       }
       return 'hi-IN';
     }
@@ -277,6 +283,29 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   String _generateTempFilePath() {
     final tempDir = Directory.systemTemp;
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
+  }
+
+  Future<String> _detectLanguageFromBackend(File audioFile) async {
+    final uri = Uri.parse('${ApiConstants.baseUrl}/detect_language/');
+    final request = http.MultipartRequest('POST', uri)
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          'audio',
+          await audioFile.readAsBytes(),
+          filename: audioFile.path.split('/').last,
+          contentType: MediaType('audio', 'wav'),
+        ),
+      );
+
+    try {
+      final response = await request.send();
+      if (response.statusCode == 200) {
+        final body = await response.stream.bytesToString();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        return data['language'] as String? ?? 'en';
+      }
+    } catch (_) {}
+    return 'en';
   }
 
   Future<void> _startListening() async {
@@ -475,9 +504,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
     final prefs = await SharedPreferences.getInstance();
     final storedEmail = prefs.getString('email') ?? '';
+    final detectedLanguage = await _detectLanguageFromBackend(audioFile);
+    _currentLanguage = detectedLanguage;
 
     Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=hi-IN',
+      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$detectedLanguage',
     );
 
     void showAccountDeletedDialog() {
@@ -640,7 +671,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             final data = speakerEntry[key] as Map<String, dynamic>;
             final name = data['name'] as String? ?? 'Unknown';
             final rawText = data['spoken_text'] as String? ?? '';
-            final language = _detectLanguage(rawText);
+            final language = detectedLanguage;
             final text = _containsHindi(rawText) ? _toHinglish(rawText) : rawText;
             final time = TimeOfDay.now().format(context);
 
@@ -756,6 +787,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     print('geetetet $uri');
     try {
       await http.post(uri);
+      _currentLanguage = language;
     } catch (_) {}
   }
 
