@@ -62,6 +62,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _isApiProcessing = false;
   int _audioLabel = 0;
 
+  String _currentLanguage = 'en';
+
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
   bool _shouldAutoscroll = true;
@@ -260,18 +262,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   String _detectLanguage(String text) {
-    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(text)) return 'Punjabi';
-    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'Gujarati';
-    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'Tamil';
-    if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'Bengali';
+    if (RegExp(r'[\u0A00-\u0A7F]').hasMatch(text)) return 'pa-IN';
+    if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'gu-IN';
+    if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'ta-IN';
+    if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'bn-IN';
     if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'Urdu';
     if (RegExp(r'[\u0900-\u097F]').hasMatch(text)) {
       if (RegExp(r'[\u0933\u0931\u0934\u0972\u0911\u090D]').hasMatch(text)) {
         return 'Marathi';
       }
-      return 'Hindi';
+      return 'hi-IN';
     }
-    return 'English';
+    return 'en';
   }
 
   String _generateTempFilePath() {
@@ -478,7 +480,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final storedEmail = prefs.getString('email') ?? '';
 
     Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=Hindi',
+      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$_currentLanguage',
     );
 
     void showAccountDeletedDialog() {
@@ -757,6 +759,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     print('geetetet $uri');
     try {
       await http.post(uri);
+      _currentLanguage = language;
     } catch (_) {}
   }
 
