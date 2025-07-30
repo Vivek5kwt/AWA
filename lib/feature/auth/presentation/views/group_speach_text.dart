@@ -11,6 +11,7 @@ import 'package:wave_blob/wave_blob.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
@@ -55,6 +56,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   final FlutterTts _flutterTts = FlutterTts();
 
+  final SpeechToText _speech = SpeechToText();
+  bool _speechEnabled = false;
+  String _localeId = '';
+  List<LocaleName> _availableLocales = [];
+
 
   bool _speakOnMeeting = true;
 
@@ -75,6 +81,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   String _latestSentence = '';
   Timer? _latestSentenceTimer;
   Timer? _silenceTimer;
+  Timer? _segmentTimer;
   final Duration _silenceDuration = const Duration(minutes: 2);
 
   @override
@@ -86,6 +93,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
+    _initSpeech();
     _initUser();
     _initTTS();
     _loadSpeakOnMeeting();
@@ -170,6 +178,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       'name': 'en-in-x-end-network',
       'locale': 'en-IN',
     });
+  }
+
+  Future<void> _initSpeech() async {
+    _speechEnabled = await _speech.initialize();
+    if (_speechEnabled) {
+      _availableLocales = await _speech.locales();
+      final locale = await _speech.systemLocale();
+      _localeId = locale?.localeId ?? 'en_US';
+    }
   }
 
   String _capitalize(String s) {
@@ -266,14 +283,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     if (RegExp(r'[\u0A80-\u0AFF]').hasMatch(text)) return 'gu-IN';
     if (RegExp(r'[\u0B80-\u0BFF]').hasMatch(text)) return 'ta-IN';
     if (RegExp(r'[\u0980-\u09FF]').hasMatch(text)) return 'bn-IN';
-    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'Urdu';
+    if (RegExp(r'[\u0600-\u06FF]').hasMatch(text)) return 'ur-IN';
     if (RegExp(r'[\u0900-\u097F]').hasMatch(text)) {
       if (RegExp(r'[\u0933\u0931\u0934\u0972\u0911\u090D]').hasMatch(text)) {
-        return 'Marathi';
+        return 'mr-IN';
       }
       return 'hi-IN';
     }
-    return 'en';
+    return 'en-US';
   }
 
   String _generateTempFilePath() {
@@ -282,11 +299,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   Future<void> _startListening() async {
-    if (!await _recorder.hasPermission()) return;
+    if (!_speechEnabled) return;
 
     setState(() {
       _isRecording = true;
       _speakerIndex = 0;
+      _latestSentence = '';
     });
     _resetSilenceTimer();
 
@@ -298,20 +316,30 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       });
     });
 
-    _currentFilePath = _generateTempFilePath();
-    await _recorder.start(
-      RecordConfig(
-        encoder: AudioEncoder.wav,
-        bitRate: 256000,
-        sampleRate: 44100,
-        numChannels: 1,
-      ),
-      path: _currentFilePath!,
+    await _speech.listen(
+      onResult: _onSpeechResult,
+      listenMode: ListenMode.dictation,
+      partialResults: true,
+      localeId: _localeId,
+      onDevice: true,
     );
 
-
-
-    _continueRecordingCycle();
+    _segmentTimer?.cancel();
+    _segmentTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+      if (!_isRecording) return;
+      if (_speech.isListening) {
+        await _speech.stop();
+      }
+      if (_isRecording) {
+        await _speech.listen(
+          onResult: _onSpeechResult,
+          listenMode: ListenMode.dictation,
+          partialResults: true,
+          localeId: _localeId,
+          onDevice: true,
+        );
+      }
+    });
   }
 
   Future<void> _continueRecordingCycle() async {
@@ -382,28 +410,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
     _silenceTimer?.cancel();
     _amplitudeTimer?.cancel();
+    _segmentTimer?.cancel();
 
-    String? stoppedPath;
-    if (await _recorder.isRecording()) {
-      stoppedPath = await _recorder.stop();
-    } else if (_currentFilePath != null) {
-      stoppedPath = _currentFilePath;
-    }
-
-    if (stoppedPath != null) {
-      final file = File(stoppedPath);
-      if (await file.exists()) {
-        int durationSec = await _getWavDurationSeconds(file);
-        if (durationSec <= 19 && durationSec >= 1) {
-          final label = _audioLabel++;
-          bool shouldSend = await _isAudioSignificant(file);
-          if (shouldSend) {
-            _resetSilenceTimer();
-            _audioQueue.add(_AudioQueueItem(file: file, label: label));
-            _processAudioQueue();
-          }
-        }
-      }
+    if (_speech.isListening) {
+      await _speech.stop();
     }
   }
   Future<int> _getWavDurationSeconds(File file) async {
@@ -461,6 +471,46 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         );
       }
     });
+  }
+
+  void _onSpeechResult(SpeechRecognitionResult result) async {
+    final detectedLanguage = _detectLanguage(result.recognizedWords);
+    if (_availableLocales.any((l) => l.localeId == detectedLanguage)) {
+      if (detectedLanguage != _localeId) {
+        _localeId = detectedLanguage;
+        if (_speech.isListening) {
+          await _speech.stop();
+          await _speech.listen(
+            onResult: _onSpeechResult,
+            listenMode: ListenMode.dictation,
+            partialResults: true,
+            localeId: _localeId,
+            onDevice: true,
+          );
+        }
+      }
+    }
+    setState(() {
+      _latestSentence = result.recognizedWords;
+      _currentLanguage = detectedLanguage;
+    });
+
+    if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+      _messages.add({
+        'user': _myName,
+        'text': result.recognizedWords,
+        'time': TimeOfDay.now().format(context),
+        'isMe': true,
+        'spoken': false,
+      });
+      _latestSentenceTimer?.cancel();
+      _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+        setState(() {
+          _latestSentence = '';
+        });
+      });
+      if (_shouldAutoscroll) _scrollToBottom();
+    }
   }
 
   void _processAudioQueue() async {
