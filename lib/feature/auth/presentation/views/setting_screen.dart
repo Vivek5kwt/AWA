@@ -19,6 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   bool _notificationsEnabled = true;
   bool _speakOnMeeting = true;
+  bool _showTextMyLanguage = false;
 
   @override
   void initState() {
@@ -32,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _notificationsEnabled = prefs.getBool('notifications') ?? true;
       _speakOnMeeting = prefs.getBool('speakOnMeeting') ?? true;
+      _showTextMyLanguage = prefs.getBool('useNativeApi') ?? false;
     });
   }
 
@@ -45,6 +47,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('speakOnMeeting', value);
     setState(() => _speakOnMeeting = value);
+  }
+
+  Future<void> _updateShowTextMyLanguage(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('useNativeApi', value);
+    setState(() => _showTextMyLanguage = value);
   }
 
   void _navigateToTerms() {
@@ -211,15 +219,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _isDarkMode ? Colors.white70 : Colors.grey.shade700,
                     ),
                   ),
-                  value: _speakOnMeeting,
-                  onChanged: _updateSpeakOnMeeting,
-                ),
+                value: _speakOnMeeting,
+                onChanged: _updateSpeakOnMeeting,
               ),
-              const SizedBox(height: 16),
-              Card(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              elevation: 4,
+              color: _isDarkMode
+                  ? Colors.black.withOpacity(0.5)
+                  : Colors.white.withOpacity(0.84),
+              child: SwitchListTile(
+                title: Row(
+                  children: [
+                    const Icon(Icons.translate, color: Colors.deepPurple),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        context.loc.showTextMyLanguage,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: _isDarkMode ? Colors.white : Colors.black,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+                value: _showTextMyLanguage,
+                onChanged: _updateShowTextMyLanguage,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
                 elevation: 5,
                 margin: const EdgeInsets.symmetric(vertical: 8),
                 child: InkWell(
