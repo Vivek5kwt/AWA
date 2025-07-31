@@ -7,12 +7,10 @@ import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
@@ -57,18 +55,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   final FlutterTts _flutterTts = FlutterTts();
 
-  final SpeechToText _speech = SpeechToText();
-  bool _speechEnabled = false;
-  String _localeId = '';
-
+  final String _appLanguageCode = 'en';
 
   bool _speakOnMeeting = true;
 
   final List<_AudioQueueItem> _audioQueue = [];
   bool _isApiProcessing = false;
   int _audioLabel = 0;
-
-  String _currentLanguage = 'en';
 
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
@@ -82,7 +75,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _latestSentenceTimer;
   Timer? _silenceTimer;
   final Duration _silenceDuration = const Duration(minutes: 2);
-  String _identifySpeakerRawResponse = '';
 
   @override
   void initState() {
@@ -93,7 +85,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
-    _initSpeech();
     _initUser();
     _initTTS();
     _loadSpeakOnMeeting();
@@ -180,152 +171,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
   }
 
-  Future<void> _initSpeech() async {
-    _speechEnabled = await _speech.initialize();
-    if (_speechEnabled) {
-      final locale = await _speech.systemLocale();
-      _localeId = locale?.localeId ?? 'en_US';
-    }
-  }
-
   String _capitalize(String s) {
     if (s.isEmpty) return s;
     return s[0].toUpperCase() + s.substring(1);
-  }
-
-  bool _containsHindi(String text) {
-    return text.runes.any((c) => c >= 0x0900 && c <= 0x097F);
-  }
-
-  String _toHinglish(String text) {
-    const Map<String, String> map = {
-      'अ': 'a',
-      'आ': 'aa',
-      'इ': 'i',
-      'ई': 'ee',
-      'उ': 'u',
-      'ऊ': 'oo',
-      'ऋ': 'ri',
-      'ए': 'e',
-      'ऐ': 'ai',
-      'ओ': 'o',
-      'औ': 'au',
-      'क': 'k',
-      'ख': 'kh',
-      'ग': 'g',
-      'घ': 'gh',
-      'ङ': 'n',
-      'च': 'ch',
-      'छ': 'chh',
-      'ज': 'j',
-      'झ': 'jh',
-      'ञ': 'n',
-      'ट': 't',
-      'ठ': 'th',
-      'ड': 'd',
-      'ढ': 'dh',
-      'ण': 'n',
-      'त': 't',
-      'थ': 'th',
-      'द': 'd',
-      'ध': 'dh',
-      'न': 'n',
-      'प': 'p',
-      'फ': 'ph',
-      'ब': 'b',
-      'भ': 'bh',
-      'म': 'm',
-      'य': 'y',
-      'र': 'r',
-      'ल': 'l',
-      'व': 'v',
-      'श': 'sh',
-      'ष': 'sh',
-      'स': 's',
-      'ह': 'h',
-      'ा': 'aa',
-      'ि': 'i',
-      'ी': 'ee',
-      'ु': 'u',
-      'ू': 'oo',
-      'ृ': 'ri',
-      'े': 'e',
-      'ै': 'ai',
-      'ो': 'o',
-      'ौ': 'au',
-      'ं': 'n',
-      'ँ': 'n',
-      'ः': 'h',
-      '़': '',
-      '्': '',
-      '०': '0',
-      '१': '1',
-      '२': '2',
-      '३': '3',
-      '४': '4',
-      '५': '5',
-      '६': '6',
-      '७': '7',
-      '८': '8',
-      '९': '9',
-    };
-    final buffer = StringBuffer();
-    for (final codeUnit in text.runes) {
-      final ch = String.fromCharCode(codeUnit);
-      buffer.write(map[ch] ?? ch);
-    }
-    return buffer.toString();
-  }
-
-  String _detectLanguage(String text) {
-    bool containsRange(int start, int end) =>
-        text.runes.any((c) => c >= start && c <= end);
-
-    if (containsRange(0x0A00, 0x0A7F)) return 'pa-IN';
-    if (containsRange(0x0A80, 0x0AFF)) return 'gu-IN';
-    if (containsRange(0x0B80, 0x0BFF)) return 'ta-IN';
-    if (containsRange(0x0980, 0x09FF)) return 'bn-IN';
-    if (containsRange(0x0600, 0x06FF)) return 'Urdu';
-    if (containsRange(0x0900, 0x097F)) {
-      final marathiChars = [0x0933, 0x0931, 0x0934, 0x0972, 0x0911, 0x090D];
-      if (text.runes.any(marathiChars.contains)) {
-        return 'mr-IN';
-      }
-      return 'hi-IN';
-    }
-    return 'en';
-  }
-
-  Future<String> _detectLanguageGoogle(String text, String accessToken) async {
-    final project = ApiConstants.googleProjectId;
-    final url = Uri.parse(
-      'https://translation.googleapis.com/v3/projects/$project/locations/global:detectLanguage',
-    );
-    print('Sending request to $url');
-    try {
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $accessToken',
-        },
-        body: jsonEncode({'content': text}),
-      );
-      print('Response code: ${response.statusCode}');
-      print('Response body: ${response.body}');
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final languages = data['languages'] as List<dynamic>?;
-        if (languages != null && languages.isNotEmpty) {
-          final info = languages.first as Map<String, dynamic>;
-          final code = info['languageCode'] as String?;
-          if (code != null) return code;
-        }
-      }
-    } catch (e) {
-      print('Error: $e');
-    }
-    return 'und';
   }
 
   String _generateTempFilePath() {
@@ -333,38 +181,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
   }
 
-  Future<String> _detectLanguageFromBackend(File audioFile) async {
-    final uri = Uri.parse('${ApiConstants.baseUrl}/detect_language/');
-    final request = http.MultipartRequest('POST', uri)
-      ..files.add(
-        http.MultipartFile.fromBytes(
-          'audio',
-          await audioFile.readAsBytes(),
-          filename: audioFile.path.split('/').last,
-          contentType: MediaType('audio', 'wav'),
-        ),
-      );
-
-    try {
-      final response = await request.send();
-      if (response.statusCode == 200) {
-        final body = await response.stream.bytesToString();
-        final data = jsonDecode(body) as Map<String, dynamic>;
-        // API returns a JSON like
-        // {"text": "...", "language": "so", ...}
-        return data['language'] as String? ?? 'en';
-      }
-    } catch (_) {}
-    return 'en';
-  }
-
   Future<void> _startListening() async {
-    if (!_speechEnabled) return;
+    if (!await _recorder.hasPermission()) return;
 
     setState(() {
       _isRecording = true;
       _speakerIndex = 0;
-      _latestSentence = '';
     });
     _resetSilenceTimer();
 
@@ -376,12 +198,20 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       });
     });
 
-    await _speech.listen(
-      onResult: _onSpeechResult,
-      listenMode: ListenMode.dictation,
-      partialResults: true,
-      localeId: _localeId,
+    _currentFilePath = _generateTempFilePath();
+    await _recorder.start(
+      RecordConfig(
+        encoder: AudioEncoder.wav,
+        bitRate: 256000,
+        sampleRate: 44100,
+        numChannels: 1,
+      ),
+      path: _currentFilePath!,
     );
+
+
+
+    _continueRecordingCycle();
   }
 
   Future<void> _continueRecordingCycle() async {
@@ -453,8 +283,27 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _silenceTimer?.cancel();
     _amplitudeTimer?.cancel();
 
-    if (_speech.isListening) {
-      await _speech.stop();
+    String? stoppedPath;
+    if (await _recorder.isRecording()) {
+      stoppedPath = await _recorder.stop();
+    } else if (_currentFilePath != null) {
+      stoppedPath = _currentFilePath;
+    }
+
+    if (stoppedPath != null) {
+      final file = File(stoppedPath);
+      if (await file.exists()) {
+        int durationSec = await _getWavDurationSeconds(file);
+        if (durationSec <= 19 && durationSec >= 1) {
+          final label = _audioLabel++;
+          bool shouldSend = await _isAudioSignificant(file);
+          if (shouldSend) {
+            _resetSilenceTimer();
+            _audioQueue.add(_AudioQueueItem(file: file, label: label));
+            _processAudioQueue();
+          }
+        }
+      }
     }
   }
   Future<int> _getWavDurationSeconds(File file) async {
@@ -469,6 +318,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
 
+  bool _isTextInLanguage(String text, String languageCode) {
+    if (languageCode == 'en') {
+      final onlyLetters =
+      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
+      return onlyLetters.length > text.length * 0.6;
+    }
+    return true;
+  }
 
   void _resetSilenceTimer() {
     _silenceTimer?.cancel();
@@ -502,6 +359,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       ),
     );
   }
+
   void _scrollToBottom({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -512,13 +370,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         );
       }
     });
-  }
-
-  void _onSpeechResult(SpeechRecognitionResult result) {
-    // The application previously used local speech-to-text results to display
-    // the ongoing transcription. This caused a mismatch with the text
-    // returned by the backend API. We now rely solely on the API response and
-    // ignore the local speech recognition output.
   }
 
   void _processAudioQueue() async {
@@ -535,12 +386,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
     final prefs = await SharedPreferences.getInstance();
     final storedEmail = prefs.getString('email') ?? '';
-    final detectedLanguage = _currentLanguage;
 
     Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$detectedLanguage',
+      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label',
     );
-
     void showAccountDeletedDialog() {
       showGeneralDialog(
         context: context,
@@ -691,11 +540,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         return;
       }
       if (response.statusCode == 200) {
-        setState(() {
-          _identifySpeakerRawResponse = utf8.decode(response.bodyBytes);
-        });
-        final body = jsonDecode(_identifySpeakerRawResponse)
-        as Map<String, dynamic>;
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
 
         setState(() {
@@ -703,16 +548,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             final key = (speakerEntry as Map<String, dynamic>).keys.first;
             final data = speakerEntry[key] as Map<String, dynamic>;
             final name = data['name'] as String? ?? 'Unknown';
-            final rawText = data['spoken_text'] as String? ?? '';
-            final translatedText = data['translated_text'] as String?;
-            final language = data['language'] as String? ?? detectedLanguage;
-            final text = translatedText ?? rawText;
+            final text = data['spoken_text'] as String? ?? '';
             final time = TimeOfDay.now().format(context);
 
-            debugPrint('Label \$label language: $language');
-            _sendLanguageForLabel(label, language);
-
-            if (text.trim().isEmpty) {
+            if (text.trim().isEmpty || !_isTextInLanguage(text, _appLanguageCode)) {
               continue;
             }
 
@@ -722,7 +561,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               'time': time,
               'isMe': false,
               'spoken': false,
-              'language': language,
               'audioLabel': label,
             });
             _latestSentence = text;
@@ -742,9 +580,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         final errorBody = response.body.isNotEmpty
             ? response.body
             : 'No error message from API';
-        setState(() {
-          _identifySpeakerRawResponse = errorBody;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('API error ${response.statusCode}: $errorBody'),
@@ -754,9 +589,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         );
       }
     } catch (e) {
-      setState(() {
-        _identifySpeakerRawResponse = 'Failed to call API: $e';
-      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to call API: $e'),
@@ -771,9 +603,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
 
-    final offlineLang = _detectLanguage(msg);
-    _currentLanguage = offlineLang;
-
     setState(() {
       _messages.add({
         'user': _myName,
@@ -781,7 +610,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
-        'language': offlineLang,
       });
       _textController.clear();
       _latestSentence = msg;
@@ -800,17 +628,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
 
     if (_shouldAutoscroll) _scrollToBottom();
-
-    _detectLanguageGoogle(msg,'ya29.c.c0ASRK0GadL2PWrnMZ17w0h6MAD_2oyo5cLK6U1wrnfJpxIuNUrs0UuU1ustSFj4VXH7eNtL03tZyA458Pkcdhne9LzHswOyWnmNtRGc93WtedjAP09gm8q-Z_WylT0k-77Nw2DhYT9x14_jV9gasDF4g31XJT19BXDz3lKSk7ApypZm_08JeAroWpX5kxTcajMnsSO24EJMSppyLLEeKchQU9phuCP1orOaPhxxLtoqFDvH5-pKyg4lVwbr8JWU6suxTQEtySuD7_UuCX2t9bImvGn7HQYlKLXXaDtzP3KuJzuaejsSI_USKZpObLe2Bf2_AEnEBTEPo4hsDRxskhL_UsIJ4Jbu1tKGYJx0s_bFumTNUVwElTf6UyRK11BfVgpbjOCQE399P82iZ5iO3JsZzqUkdt6RxqBjoqRyn_iwpXFkV8vpygu5XgIWyR3_dYbiISbZUw5-ay9X5xFzM1qn3dRJZr1704hrSzf3jX4SZ37Wtf9agqszdO-YJO8u5QYi9ljibuRtqwepRt8-t5MwS0lxJh-6qVvOBrvw4aZF6MiwO5sawxww6cXmgzu3dkp7avmRfl5iRvXVJqzc_J_ilmFM_asOjysfiasOffg3xfc9S0ft-haMo-tqBWXt9bUjMf8xUknSchBUxmUcWcca47O_i_iqqFmJeF5jy8XoUB_pIsQ4X4ZyytxsbUbISFkO5V8pk5d1z5gl6Od5_aq7ilnoWaJxkY-bs1xvc1Yuls6c0FYy6Iirw_5IIB4X2Of1Q__mIa6mFd-Iqxxnw5Ij9txwvqUJvfX2l-7SSXM4XzBbQm6B54wyt96X8qZ9srYsoualI-us3SJ37OrsiwsBioiRRqR0k_nXlIgqWIt7d_udy0qoUjjnZU59cljjh--wceecyFsn7z4nJxZogOvZU3MRc6jc7Zt6d8015SyldXRQR1leiRQSgXduS_dZV_vobI4iWq017llpy_hv2Iy84Rzi0umXvxaXW7U1OhvOhMyuIj0uWnmY3').then((detected) {
-      if (detected != 'und') {
-        setState(() {
-          _currentLanguage = detected;
-          final idx = _messages.lastIndexWhere(
-                  (m) => m['text'] == msg && m['isMe'] == true);
-          if (idx != -1) _messages[idx]['language'] = detected;
-        });
-      }
-    });
   }
 
   Future<void> _speakMyLastMessage(String msg) async {
@@ -832,18 +649,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         _messages[index]['spoken'] = true;
       });
     }
-  }
-
-  Future<void> _sendLanguageForLabel(int label, String language) async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('email') ?? '';
-    final uri = Uri.parse(
-        '${ApiConstants.baseUrl}/identify_speaker?email=$email&label=$label&language=$language');
-    print('geetetet $uri');
-    try {
-      await http.post(uri);
-      _currentLanguage = language;
-    } catch (_) {}
   }
 
   Future<void> _saveCurrentMeetingToFirestore() async {
@@ -921,59 +726,38 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
           Tooltip(
             message: "Chat History",
             verticalOffset: 30,
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.85),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            textStyle: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              fontSize: 14,
-            ),
             child: Container(
               margin: const EdgeInsets.only(right: 10),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
                   colors: widget.isDarkMode
-                      ? [
-                    Colors.white.withOpacity(0.06),
-                    Colors.blueGrey.withOpacity(0.14)
-                  ]
-                      : [
-                    Colors.blueAccent.withOpacity(0.08),
-                    Colors.purpleAccent.withOpacity(0.09),
-                  ],
+                      ? [Colors.cyanAccent.withOpacity(0.14), Colors.blueAccent.withOpacity(0.13)]
+                      : [Colors.deepPurpleAccent.withOpacity(0.11), Colors.amber.withOpacity(0.14)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: widget.isDarkMode
-                        ? Colors.black.withOpacity(0.28)
-                        : Colors.blueGrey.withOpacity(0.12),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+                        ? Colors.cyanAccent.withOpacity(0.13)
+                        : Colors.deepPurpleAccent.withOpacity(0.07),
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
                   ),
                 ],
-                border: Border.all(
-                  color: widget.isDarkMode
-                      ? Colors.white.withOpacity(0.10)
-                      : Colors.blueGrey.withOpacity(0.09),
-                  width: 1.2,
-                ),
               ),
               child: IconButton(
                 icon: Icon(
                   Icons.history_edu_rounded,
-                  color: Colors.white,
-                  size: 28,
+                  color: widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
+                  size: 27,
                   shadows: [
                     Shadow(
                       color: widget.isDarkMode
-                          ? Colors.cyanAccent.withOpacity(0.35)
-                          : Colors.blueAccent.withOpacity(0.24),
-                      blurRadius: 11,
+                          ? Colors.cyanAccent.withOpacity(0.22)
+                          : Colors.deepPurpleAccent.withOpacity(0.11),
+                      blurRadius: 9,
                     ),
                   ],
                 ),
@@ -988,8 +772,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                     ),
                   );
                 },
-                splashRadius: 27,
-                tooltip: "Chat History",
+                splashRadius: 26,
               ),
             ),
           ),
@@ -1263,25 +1046,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                       ),
-                    ),
-                  ),
-                ),
-              if (_identifySpeakerRawResponse.isNotEmpty)
-                Positioned(
-                  bottom: 150,
-                  left: 0,
-                  right: 0,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 24),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _identifySpeakerRawResponse,
-                      style: const TextStyle(color: Colors.white),
-                      textAlign: TextAlign.center,
                     ),
                   ),
                 ),
