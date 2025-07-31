@@ -18,7 +18,6 @@ import 'package:showcaseview/showcaseview.dart';
 import '../../../../core/network/http_service.dart';
 import '../../../../main.dart';
 import '../../../common_widgets/custom_drop_down.dart';
-
 class HomeScreen extends StatefulWidget {
   final String phoneNumber;
 
@@ -27,7 +26,6 @@ class HomeScreen extends StatefulWidget {
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
-
 class WaveClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
