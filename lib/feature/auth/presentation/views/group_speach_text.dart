@@ -295,6 +295,38 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return 'en';
   }
 
+  Future<String> _detectLanguageGoogle(String text, String accessToken) async {
+    final project = ApiConstants.googleProjectId;
+    final url = Uri.parse(
+      'https://translation.googleapis.com/v3/projects/$project/locations/global:detectLanguage',
+    );
+    print('Sending request to $url');
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({'content': text}),
+      );
+      print('Response code: ${response.statusCode}');
+      print('Response body: ${response.body}');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final languages = data['languages'] as List<dynamic>?;
+        if (languages != null && languages.isNotEmpty) {
+          final info = languages.first as Map<String, dynamic>;
+          final code = info['languageCode'] as String?;
+          if (code != null) return code;
+        }
+      }
+    } catch (e) {
+      print('Error: $e');
+    }
+    return 'und';
+  }
+
   String _generateTempFilePath() {
     final tempDir = Directory.systemTemp;
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
@@ -487,12 +519,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
 
     if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+      final lang = _detectLanguage(result.recognizedWords);
+      _currentLanguage = lang;
       _messages.add({
         'user': _myName,
         'text': result.recognizedWords,
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
+        'language': lang,
       });
       _latestSentenceTimer?.cancel();
       _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
@@ -501,6 +536,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         });
       });
       if (_shouldAutoscroll) _scrollToBottom();
+
+      _detectLanguageGoogle(result.recognizedWords,'ya29.c.c0ASRK0GZFM4uVgDy3LHsqQa7X_C6jmGorz1Yph3jAFpoqw6FSdmuu8f8SJTsqcl1IHz6EGjJ7qKlhDSXVvHxXXswk7yH0HA-WoMqHb45d41Rg_7j3bcKCnwq3uQgpL0jwij2ZqQ6ihnSjPaGsCuRmq1VgXuWHcsEufRcBKzIDRFZyCuTHL94Gx4TptLkk-_Q8JKayPhWblb22OEVMfTH8DKLGvC4aRLPUCSS2HxKlZ0vIsa2QDPT8rTvWnyqdusYhN7Q7Gzl5zvvZf-dyRvVWGA_MA4wngF2P8gN83rJTPzf-LKaCBd4r-LvOYZsvOkbYRCxtFv49VirXjQ4cqBNIobPQe_S_MGUAKO7B_FbBkkgUYLsVLN60UJaF_CMcYmGjO3FhMfkL400KcRSvO1M8WO-q76Ydmc1tsOilqoovkF1pa5i4k834cuIetnzk78uwBWZ3q5cyVVUnfnoFYm7_FooZwjzJYmWfo15foIM2bRvwBXO-Ufd8UvbqS3UtfZkkOW6o5WoBjovmxoBzvUfSQk9v1IIh55vuVxlQiQj1_v17JMYJR-Zrbvw-8q6M_FRZBti8QMiYq6bhw30B6tc8XcQeOXf9_bVdxrO1Qiq6ogi-O9xeuy1i1ifnJVq1vpzh_fzx27R-UB-6QYo2uhYMnMSJoRUUM1ws7Stv3R5QhI8izx82XBi7ktnvf0BZ1_iyeVXy8umoXcS7mfrQntJ04kW1yQybcQYyY7ZksVpsesMq1zray-uBwZiqb78c2rYzcgjb-W5zznQ9X28hUm3XkbRZq3gUfijJV5edJdfpljXfyuOQqW6RZubIBIfU_n-64WRhdM7lclud9MkbB3a92s_B8hOlJuVwoyezwx6YxRde53SII7p8MBg_8hrqryIIv8upqnfBakxwtgynOSfIO05tYlo1dp5eJ2YV9qhpnaMx8nguv-IyZQc_SecUMSQUJx4cMbWnxszsBhqj1vUUbRSJBw2cUcp0yR56UmYpXQiMs89Vd1jt541').then((detected) {
+        if (detected != 'und') {
+          setState(() {
+            _currentLanguage = detected;
+            final idx = _messages.lastIndexWhere((m) => m['text'] == result.recognizedWords && m['isMe'] == true);
+            if (idx != -1) _messages[idx]['language'] = detected;
+          });
+        }
+      });
     }
   }
 
@@ -745,6 +790,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
 
+    final offlineLang = _detectLanguage(msg);
+    _currentLanguage = offlineLang;
+
     setState(() {
       _messages.add({
         'user': _myName,
@@ -752,6 +800,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
+        'language': offlineLang,
       });
       _textController.clear();
       _latestSentence = msg;
@@ -770,6 +819,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
 
     if (_shouldAutoscroll) _scrollToBottom();
+
+    _detectLanguageGoogle(msg,'ya29.c.c0ASRK0GZFM4uVgDy3LHsqQa7X_C6jmGorz1Yph3jAFpoqw6FSdmuu8f8SJTsqcl1IHz6EGjJ7qKlhDSXVvHxXXswk7yH0HA-WoMqHb45d41Rg_7j3bcKCnwq3uQgpL0jwij2ZqQ6ihnSjPaGsCuRmq1VgXuWHcsEufRcBKzIDRFZyCuTHL94Gx4TptLkk-_Q8JKayPhWblb22OEVMfTH8DKLGvC4aRLPUCSS2HxKlZ0vIsa2QDPT8rTvWnyqdusYhN7Q7Gzl5zvvZf-dyRvVWGA_MA4wngF2P8gN83rJTPzf-LKaCBd4r-LvOYZsvOkbYRCxtFv49VirXjQ4cqBNIobPQe_S_MGUAKO7B_FbBkkgUYLsVLN60UJaF_CMcYmGjO3FhMfkL400KcRSvO1M8WO-q76Ydmc1tsOilqoovkF1pa5i4k834cuIetnzk78uwBWZ3q5cyVVUnfnoFYm7_FooZwjzJYmWfo15foIM2bRvwBXO-Ufd8UvbqS3UtfZkkOW6o5WoBjovmxoBzvUfSQk9v1IIh55vuVxlQiQj1_v17JMYJR-Zrbvw-8q6M_FRZBti8QMiYq6bhw30B6tc8XcQeOXf9_bVdxrO1Qiq6ogi-O9xeuy1i1ifnJVq1vpzh_fzx27R-UB-6QYo2uhYMnMSJoRUUM1ws7Stv3R5QhI8izx82XBi7ktnvf0BZ1_iyeVXy8umoXcS7mfrQntJ04kW1yQybcQYyY7ZksVpsesMq1zray-uBwZiqb78c2rYzcgjb-W5zznQ9X28hUm3XkbRZq3gUfijJV5edJdfpljXfyuOQqW6RZubIBIfU_n-64WRhdM7lclud9MkbB3a92s_B8hOlJuVwoyezwx6YxRde53SII7p8MBg_8hrqryIIv8upqnfBakxwtgynOSfIO05tYlo1dp5eJ2YV9qhpnaMx8nguv-IyZQc_SecUMSQUJx4cMbWnxszsBhqj1vUUbRSJBw2cUcp0yR56UmYpXQiMs89Vd1jt541').then((detected) {
+      if (detected != 'und') {
+        setState(() {
+          _currentLanguage = detected;
+          final idx = _messages.lastIndexWhere(
+                  (m) => m['text'] == msg && m['isMe'] == true);
+          if (idx != -1) _messages[idx]['language'] = detected;
+        });
+      }
+    });
   }
 
   Future<void> _speakMyLastMessage(String msg) async {
