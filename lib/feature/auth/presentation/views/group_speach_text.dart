@@ -82,6 +82,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _latestSentenceTimer;
   Timer? _silenceTimer;
   final Duration _silenceDuration = const Duration(minutes: 2);
+  String _identifySpeakerRawResponse = '';
 
   @override
   void initState() {
@@ -563,8 +564,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
     final prefs = await SharedPreferences.getInstance();
     final storedEmail = prefs.getString('email') ?? '';
-    final detectedLanguage = await _detectLanguageFromBackend(audioFile);
-    _currentLanguage = detectedLanguage;
+    final detectedLanguage = _currentLanguage;
 
     Uri uri = Uri.parse(
       '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$detectedLanguage',
@@ -720,7 +720,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         return;
       }
       if (response.statusCode == 200) {
-        final body = jsonDecode(utf8.decode(response.bodyBytes))
+        setState(() {
+          _identifySpeakerRawResponse = utf8.decode(response.bodyBytes);
+        });
+        final body = jsonDecode(_identifySpeakerRawResponse)
         as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
 
@@ -767,6 +770,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         final errorBody = response.body.isNotEmpty
             ? response.body
             : 'No error message from API';
+        setState(() {
+          _identifySpeakerRawResponse = errorBody;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('API error ${response.statusCode}: $errorBody'),
@@ -776,6 +782,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         );
       }
     } catch (e) {
+      setState(() {
+        _identifySpeakerRawResponse = 'Failed to call API: $e';
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to call API: $e'),
@@ -1282,6 +1291,25 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                  ),
+                ),
+              if (_identifySpeakerRawResponse.isNotEmpty)
+                Positioned(
+                  bottom: 150,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _identifySpeakerRawResponse,
+                      style: const TextStyle(color: Colors.white),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ),
