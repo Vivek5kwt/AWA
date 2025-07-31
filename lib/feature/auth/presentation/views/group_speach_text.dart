@@ -295,6 +295,31 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return 'en';
   }
 
+  Future<String> _detectLanguageGoogle(String text) async {
+    final apiKey = ApiConstants.googleApiKey;
+    final project = ApiConstants.googleProjectId;
+    final url = Uri.parse(
+      'https://translation.googleapis.com/v3/projects/$project/locations/global:detectLanguage?key=$apiKey',
+    );
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'content': text}),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final languages = data['languages'] as List<dynamic>?;
+        if (languages != null && languages.isNotEmpty) {
+          final info = languages.first as Map<String, dynamic>;
+          final code = info['languageCode'] as String?;
+          if (code != null) return code;
+        }
+      }
+    } catch (_) {}
+    return 'und';
+  }
+
   String _generateTempFilePath() {
     final tempDir = Directory.systemTemp;
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
@@ -487,12 +512,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
 
     if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+      final lang = _detectLanguage(result.recognizedWords);
+      _currentLanguage = lang;
       _messages.add({
         'user': _myName,
         'text': result.recognizedWords,
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
+        'language': lang,
       });
       _latestSentenceTimer?.cancel();
       _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
@@ -501,6 +529,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         });
       });
       if (_shouldAutoscroll) _scrollToBottom();
+
+      _detectLanguageGoogle(result.recognizedWords).then((detected) {
+        if (detected != 'und') {
+          setState(() {
+            _currentLanguage = detected;
+            final idx = _messages.lastIndexWhere((m) => m['text'] == result.recognizedWords && m['isMe'] == true);
+            if (idx != -1) _messages[idx]['language'] = detected;
+          });
+        }
+      });
     }
   }
 
@@ -745,6 +783,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
 
+    final offlineLang = _detectLanguage(msg);
+    _currentLanguage = offlineLang;
+
     setState(() {
       _messages.add({
         'user': _myName,
@@ -752,6 +793,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
+        'language': offlineLang,
       });
       _textController.clear();
       _latestSentence = msg;
@@ -770,6 +812,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
 
     if (_shouldAutoscroll) _scrollToBottom();
+
+    _detectLanguageGoogle(msg).then((detected) {
+      if (detected != 'und') {
+        setState(() {
+          _currentLanguage = detected;
+          final idx = _messages.lastIndexWhere(
+              (m) => m['text'] == msg && m['isMe'] == true);
+          if (idx != -1) _messages[idx]['language'] = detected;
+        });
+      }
+    });
   }
 
   Future<void> _speakMyLastMessage(String msg) async {

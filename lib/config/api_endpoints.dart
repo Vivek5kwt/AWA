@@ -4,6 +4,8 @@ abstract final class ApiConstants {
  // static const String baseUrl = "http://172.232.104.30:8000";
   //local
   static const String baseUrl = "http://192.168.1.15:5000";
+  static const String googleApiKey = 'YOUR_GOOGLE_API_KEY';
+  static const String googleProjectId = 'YOUR_PROJECT_ID';
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register _user";
   static const String loginUser = "${_apiBaseUrl}login_use  r";
