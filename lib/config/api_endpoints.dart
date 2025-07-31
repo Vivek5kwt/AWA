@@ -19,9 +19,11 @@ abstract final class ApiConstants {
  static const String logoutUser = "${_apiBaseUrl}logout_user";
  static const String addFriend = "${_apiBaseUrl}add_friend";
  static const String deleteFriends = "${_apiBaseUrl}delete_friend";
- static const String deleteSpeaker = "${_apiBaseUrl}delete_speaker";
- static const String identifySpeaker = "${_apiBaseUrl}identify_speaker";
- static const String updateUserProfile =  "${_apiBaseUrl}update_user_profile";
+  static const String deleteSpeaker = "${_apiBaseUrl}delete_speaker";
+  static const String identifySpeaker = "${_apiBaseUrl}identify_speaker";
+  static const String identifySpeakerNative =
+      "${_apiBaseUrl}identify_speaker_native";
+  static const String updateUserProfile =  "${_apiBaseUrl}update_user_profile";
  static const String getNotification = "${_apiBaseUrl}get_notifications";
  static const String sendNotification = "${_apiBaseUrl}send_notification";
  static const String sendFriendNotification =
