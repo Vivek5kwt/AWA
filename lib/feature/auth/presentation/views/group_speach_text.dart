@@ -160,6 +160,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
   }
 
+  Future<void> _toggleShowTextMyLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    final newVal = !_showTextMyLanguage;
+    await prefs.setBool('useNativeApi', newVal);
+    setState(() => _showTextMyLanguage = newVal);
+  }
+
   Future<void> _loadAppLanguageCode() async {
     final prefs = await SharedPreferences.getInstance();
     final code = prefs.getString('language_code');
@@ -795,6 +802,53 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                     ),
                   );
                 },
+                splashRadius: 26,
+              ),
+            ),
+          ),
+          Tooltip(
+            message: context.loc.showTextMyLanguage,
+            verticalOffset: 30,
+            child: Container(
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  colors: widget.isDarkMode
+                      ? [Colors.cyanAccent.withOpacity(0.14), Colors.blueAccent.withOpacity(0.13)]
+                      : [Colors.deepPurpleAccent.withOpacity(0.11), Colors.amber.withOpacity(0.14)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.isDarkMode
+                        ? Colors.cyanAccent.withOpacity(0.13)
+                        : Colors.deepPurpleAccent.withOpacity(0.07),
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                icon: Icon(
+                  Icons.translate,
+                  color: _showTextMyLanguage
+                      ? Colors.greenAccent
+                      : widget.isDarkMode
+                          ? Colors.cyanAccent
+                          : Colors.deepPurpleAccent,
+                  size: 27,
+                  shadows: [
+                    Shadow(
+                      color: widget.isDarkMode
+                          ? Colors.cyanAccent.withOpacity(0.22)
+                          : Colors.deepPurpleAccent.withOpacity(0.11),
+                      blurRadius: 9,
+                    ),
+                  ],
+                ),
+                onPressed: _toggleShowTextMyLanguage,
                 splashRadius: 26,
               ),
             ),
