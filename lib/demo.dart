@@ -57,6 +57,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
 
   bool _speakOnMeeting = true;
+  bool _showTextMyLanguage = false;
 
   final List<_AudioQueueItem> _audioQueue = [];
   bool _isApiProcessing = false;
@@ -87,6 +88,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _initUser();
     _initTTS();
     _loadSpeakOnMeeting();
+    _loadShowTextMyLanguage();
     _scrollController = ScrollController();
     _scrollController.addListener(_handleScroll);
 
@@ -146,6 +148,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _speakOnMeeting = prefs.getBool('speakOnMeeting') ?? true;
+    });
+  }
+
+  Future<void> _loadShowTextMyLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _showTextMyLanguage = prefs.getBool('useNativeApi') ?? false;
     });
   }
 
@@ -378,9 +387,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final prefs = await SharedPreferences.getInstance();
     final storedEmail = prefs.getString('email') ?? '';
 
-    Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label',
-    );
+    final base = _showTextMyLanguage
+        ? ApiConstants.identifySpeakerNative
+        : ApiConstants.identifySpeaker;
+    Uri uri = Uri.parse('$base?email=$storedEmail&label=$label');
     void showAccountDeletedDialog() {
       showGeneralDialog(
         context: context,

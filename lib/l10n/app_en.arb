@@ -18,6 +18,7 @@
   "notifications": "Notifications",
   "noNotificationFound":"No notifications found!",
   "speakMyMsg":"Speak my messages in meetings",
+  "showTextMyLanguage": "Show text in my language",
   "yourMsgWillBe":"Your messages will be spoken aloud to everyone.",
   "yourMsgWillNotBe":"Your messages will not be auto-spoken. You can tap play to speak.",
   "myTransactions":"My Transactions",
