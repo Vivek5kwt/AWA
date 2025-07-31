@@ -733,8 +733,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             final data = speakerEntry[key] as Map<String, dynamic>;
             final name = data['name'] as String? ?? 'Unknown';
             final rawText = data['spoken_text'] as String? ?? '';
-            final language = detectedLanguage;
-            final text = _containsHindi(rawText) ? _toHinglish(rawText) : rawText;
+            final translatedText = data['translated_text'] as String?;
+            final language = data['language'] as String? ?? detectedLanguage;
+            final text = translatedText ?? rawText;
             final time = TimeOfDay.now().format(context);
 
             debugPrint('Label \$label language: $language');
