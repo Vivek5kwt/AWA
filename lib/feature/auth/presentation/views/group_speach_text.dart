@@ -515,39 +515,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   void _onSpeechResult(SpeechRecognitionResult result) {
-    setState(() {
-      _latestSentence = result.recognizedWords;
-    });
-
-    if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
-      final lang = _detectLanguage(result.recognizedWords);
-      _currentLanguage = lang;
-      _messages.add({
-        'user': _myName,
-        'text': result.recognizedWords,
-        'time': TimeOfDay.now().format(context),
-        'isMe': true,
-        'spoken': false,
-        'language': lang,
-      });
-      _latestSentenceTimer?.cancel();
-      _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-        setState(() {
-          _latestSentence = '';
-        });
-      });
-      if (_shouldAutoscroll) _scrollToBottom();
-
-      _detectLanguageGoogle(result.recognizedWords,'ya29.c.c0ASRK0GadL2PWrnMZ17w0h6MAD_2oyo5cLK6U1wrnfJpxIuNUrs0UuU1ustSFj4VXH7eNtL03tZyA458Pkcdhne9LzHswOyWnmNtRGc93WtedjAP09gm8q-Z_WylT0k-77Nw2DhYT9x14_jV9gasDF4g31XJT19BXDz3lKSk7ApypZm_08JeAroWpX5kxTcajMnsSO24EJMSppyLLEeKchQU9phuCP1orOaPhxxLtoqFDvH5-pKyg4lVwbr8JWU6suxTQEtySuD7_UuCX2t9bImvGn7HQYlKLXXaDtzP3KuJzuaejsSI_USKZpObLe2Bf2_AEnEBTEPo4hsDRxskhL_UsIJ4Jbu1tKGYJx0s_bFumTNUVwElTf6UyRK11BfVgpbjOCQE399P82iZ5iO3JsZzqUkdt6RxqBjoqRyn_iwpXFkV8vpygu5XgIWyR3_dYbiISbZUw5-ay9X5xFzM1qn3dRJZr1704hrSzf3jX4SZ37Wtf9agqszdO-YJO8u5QYi9ljibuRtqwepRt8-t5MwS0lxJh-6qVvOBrvw4aZF6MiwO5sawxww6cXmgzu3dkp7avmRfl5iRvXVJqzc_J_ilmFM_asOjysfiasOffg3xfc9S0ft-haMo-tqBWXt9bUjMf8xUknSchBUxmUcWcca47O_i_iqqFmJeF5jy8XoUB_pIsQ4X4ZyytxsbUbISFkO5V8pk5d1z5gl6Od5_aq7ilnoWaJxkY-bs1xvc1Yuls6c0FYy6Iirw_5IIB4X2Of1Q__mIa6mFd-Iqxxnw5Ij9txwvqUJvfX2l-7SSXM4XzBbQm6B54wyt96X8qZ9srYsoualI-us3SJ37OrsiwsBioiRRqR0k_nXlIgqWIt7d_udy0qoUjjnZU59cljjh--wceecyFsn7z4nJxZogOvZU3MRc6jc7Zt6d8015SyldXRQR1leiRQSgXduS_dZV_vobI4iWq017llpy_hv2Iy84Rzi0umXvxaXW7U1OhvOhMyuIj0uWnmY3').then((detected) {
-        if (detected != 'und') {
-          setState(() {
-            _currentLanguage = detected;
-            final idx = _messages.lastIndexWhere((m) => m['text'] == result.recognizedWords && m['isMe'] == true);
-            if (idx != -1) _messages[idx]['language'] = detected;
-          });
-        }
-      });
-    }
+    // The application previously used local speech-to-text results to display
+    // the ongoing transcription. This caused a mismatch with the text
+    // returned by the backend API. We now rely solely on the API response and
+    // ignore the local speech recognition output.
   }
 
   void _processAudioQueue() async {
