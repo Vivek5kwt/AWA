@@ -55,7 +55,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   final FlutterTts _flutterTts = FlutterTts();
 
-  final String _appLanguageCode = 'en';
+  String _appLanguageCode = 'en';
 
   bool _speakOnMeeting = true;
   bool _showTextMyLanguage = false;
@@ -90,6 +90,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _initTTS();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
+    _loadAppLanguageCode();
     _scrollController = ScrollController();
     _scrollController.addListener(_handleScroll);
 
@@ -156,6 +157,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _showTextMyLanguage = prefs.getBool('useNativeApi') ?? false;
+    });
+  }
+
+  Future<void> _loadAppLanguageCode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final code = prefs.getString('language_code');
+    setState(() {
+      _appLanguageCode = code ?? Localizations.localeOf(context).languageCode;
     });
   }
 
