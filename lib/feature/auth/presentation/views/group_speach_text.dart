@@ -82,6 +82,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _latestSentenceTimer;
   Timer? _silenceTimer;
   final Duration _silenceDuration = const Duration(minutes: 2);
+  String _identifySpeakerRawResponse = '';
+  String _sendLanguageRawResponse = '';
 
   @override
   void initState() {
@@ -563,8 +565,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
     final prefs = await SharedPreferences.getInstance();
     final storedEmail = prefs.getString('email') ?? '';
-    final detectedLanguage = await _detectLanguageFromBackend(audioFile);
-    _currentLanguage = detectedLanguage;
+    final detectedLanguage = _currentLanguage;
 
     Uri uri = Uri.parse(
       '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label&language=$detectedLanguage',
@@ -720,27 +721,34 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         return;
       }
       if (response.statusCode == 200) {
-        final body = jsonDecode(utf8.decode(response.bodyBytes))
+        setState(() {
+          _identifySpeakerRawResponse = utf8.decode(response.bodyBytes);
+        });
+        final body = jsonDecode(_identifySpeakerRawResponse)
         as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
 
-        setState(() {
-          for (var speakerEntry in speakers) {
-            final key = (speakerEntry as Map<String, dynamic>).keys.first;
-            final data = speakerEntry[key] as Map<String, dynamic>;
-            final name = data['name'] as String? ?? 'Unknown';
-            final rawText = data['spoken_text'] as String? ?? '';
-            final language = detectedLanguage;
-            final text = _containsHindi(rawText) ? _toHinglish(rawText) : rawText;
-            final time = TimeOfDay.now().format(context);
+        for (var speakerEntry in speakers) {
+          final key = (speakerEntry as Map<String, dynamic>).keys.first;
+          final data = speakerEntry[key] as Map<String, dynamic>;
+          final name = data['name'] as String? ?? 'Unknown';
+          final rawText = data['spoken_text'] as String? ?? '';
+          final language = detectedLanguage;
+          final text = _containsHindi(rawText) ? _toHinglish(rawText) : rawText;
+          final time = TimeOfDay.now().format(context);
 
-            debugPrint('Label \$label language: $language');
-            _sendLanguageForLabel(label, language);
+          debugPrint('Label \$label language: $language');
+          final langResp = await _sendLanguageForLabel(label, language);
+          if (!mounted) return;
+          if (text.trim().isEmpty) {
+            setState(() {
+              _sendLanguageRawResponse = langResp;
+            });
+            continue;
+          }
 
-            if (text.trim().isEmpty) {
-              continue;
-            }
-
+          setState(() {
+            _sendLanguageRawResponse = langResp;
             _messages.add({
               'user': name,
               'text': text,
@@ -758,8 +766,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               });
             });
             _speakerIndex++;
-          }
-        });
+          });
+        }
 
         await _saveCurrentMeetingToFirestore();
         if (_shouldAutoscroll) _scrollToBottom(animate: true);
@@ -767,6 +775,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         final errorBody = response.body.isNotEmpty
             ? response.body
             : 'No error message from API';
+        setState(() {
+          _identifySpeakerRawResponse = errorBody;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('API error ${response.statusCode}: $errorBody'),
@@ -776,6 +787,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         );
       }
     } catch (e) {
+      setState(() {
+        _identifySpeakerRawResponse = 'Failed to call API: $e';
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to call API: $e'),
@@ -853,16 +867,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
 
-  Future<void> _sendLanguageForLabel(int label, String language) async {
+  Future<String> _sendLanguageForLabel(int label, String language) async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? '';
     final uri = Uri.parse(
         '${ApiConstants.baseUrl}/identify_speaker?email=$email&label=$label&language=$language');
-    print('geetetet $uri');
     try {
-      await http.post(uri);
+      final resp = await http.post(uri);
       _currentLanguage = language;
-    } catch (_) {}
+      return utf8.decode(resp.bodyBytes);
+    } catch (e) {
+      return 'Failed to call API: $e';
+    }
   }
 
   Future<void> _saveCurrentMeetingToFirestore() async {
@@ -1282,6 +1298,44 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                       ),
+                    ),
+                  ),
+                ),
+              if (_identifySpeakerRawResponse.isNotEmpty)
+                Positioned(
+                  bottom: 150,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _identifySpeakerRawResponse,
+                      style: const TextStyle(color: Colors.white),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              if (_sendLanguageRawResponse.isNotEmpty)
+                Positioned(
+                  bottom: 120,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _sendLanguageRawResponse,
+                      style: const TextStyle(color: Colors.white),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ),
