@@ -487,12 +487,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
 
     if (result.finalResult && result.recognizedWords.trim().isNotEmpty) {
+      final language = _detectLanguage(result.recognizedWords);
+      _currentLanguage = language;
       _messages.add({
         'user': _myName,
         'text': result.recognizedWords,
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
+        'language': language,
       });
       _latestSentenceTimer?.cancel();
       _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
@@ -745,6 +748,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
 
+    final language = _detectLanguage(msg);
+    _currentLanguage = language;
+
     setState(() {
       _messages.add({
         'user': _myName,
@@ -752,6 +758,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         'time': TimeOfDay.now().format(context),
         'isMe': true,
         'spoken': false,
+        'language': language,
       });
       _textController.clear();
       _latestSentence = msg;
