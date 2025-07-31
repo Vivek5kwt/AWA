@@ -53,7 +53,7 @@ void toast({required String msg, bool isError = true}) {
                           text: msg,
                           textAlign: TextAlign.center,
                           textSize: 15,
-                          fontFamily: AppStrings.verificationTitle,
+                          fontFamily: AppStrings.fontFamily,
                           color: isError ? Colors.red : Colors.green,
                         ),
                       ),

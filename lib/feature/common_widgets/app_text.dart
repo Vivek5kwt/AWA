@@ -73,7 +73,7 @@ class AppText extends StatelessWidget {
         fontSize: textSize,
         fontStyle: fontStyle ?? FontStyle.normal,
         height: lineHeight ?? 1.0,
-        fontFamily: fontFamily ?? AppStrings.fontFamily,
+        fontFamily: _resolveFontFamily(),
         decorationColor: underlineColor ?? AppColors.black,
         decorationThickness: 1,
         decoration: strikeThrough != null && strikeThrough!
@@ -81,6 +81,14 @@ class AppText extends StatelessWidget {
             : underline != null
                 ? TextDecoration.underline
                 : null);
+  }
+
+  String? _resolveFontFamily() {
+    final fam = fontFamily ?? AppStrings.fontFamily;
+    if (fam.isEmpty) {
+      return null;
+    }
+    return fam;
   }
   FontWeight getWeight() {
     switch (style) {
