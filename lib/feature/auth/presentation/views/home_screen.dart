@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:http_parser/http_parser.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:showcaseview/showcaseview.dart';
@@ -482,8 +483,45 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (image != null) {
       setState(() {
         _pickedImage = image;
-        _profilePic = image.path;
       });
+      await _uploadProfileImage(image);
+    }
+  }
+
+  Future<void> _uploadProfileImage(XFile image) async {
+    try {
+      final uri = Uri.parse(ApiConstants.updateUserProfile);
+      final request = http.MultipartRequest('POST', uri)
+        ..fields['email'] = _email
+        ..fields['phone_number'] = _mobileNumber;
+
+      final bytes = await image.readAsBytes();
+      final fileName = image.path.split('/').last;
+      request.files.add(http.MultipartFile.fromBytes(
+        'profile_picture',
+        bytes,
+        filename: fileName,
+        contentType: MediaType('image', 'jpeg'),
+      ));
+
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final picUrl = (data['user_details']?['profile_picture_url'] as String?) ?? '';
+        if (picUrl.isNotEmpty) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('profilePhoto', picUrl);
+          if (mounted) {
+            setState(() {
+              _profilePic = picUrl;
+              _pickedImage = null;
+            });
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore upload errors for now
     }
   }
 
