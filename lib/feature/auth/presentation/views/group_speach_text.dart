@@ -807,7 +807,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             ),
           ),
           Tooltip(
-            message: context.loc.showTextMyLanguage,
+            message: 'Language',
             verticalOffset: 30,
             child: Container(
               margin: const EdgeInsets.only(right: 10),
