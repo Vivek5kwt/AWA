@@ -343,11 +343,21 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
 
+  // Allow English and major Indian scripts so that Hindi or other
+  // Indian languages are not filtered out when app language is English.
   bool _isTextInLanguage(String text, String languageCode) {
     if (languageCode == 'en') {
-      final onlyLetters =
-      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
-      return onlyLetters.length > text.length * 0.6;
+      final englishLetters =
+          text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
+      final hasIndianChars = RegExp(
+        r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF'
+        r'\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF'
+        r'\u0D00-\u0D7F\u0D80-\u0DFF]'
+      ).hasMatch(text);
+      if (englishLetters.length > text.length * 0.6 || hasIndianChars) {
+        return true;
+      }
+      return false;
     }
     return true;
   }
