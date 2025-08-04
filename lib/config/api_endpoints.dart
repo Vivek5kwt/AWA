@@ -8,10 +8,10 @@ abstract final class ApiConstants {
  static const String googleApiKey = 'AIzaSyBtUTh-qBSF35PlyBIJVJz9SU8mj2Jn1Hw';
  static const String googleProjectId = 'awa-dev-501dc';
  static const String _apiBaseUrl = "${baseUrl}/";
- static const String registerUser = "${_apiBaseUrl}register _user";
- static const String loginUser = "${_apiBaseUrl}login_use  r";
- static const String socialLogin =  "${_apiBaseUrl}login_user";
- static const String  registerSpeaker = "${_apiBaseUrl}register_speaker";
+ static const String registerUser = "${_apiBaseUrl}register_user";
+ static const String loginUser = "${_apiBaseUrl}login_user";
+ static const String socialLogin = "${_apiBaseUrl}login_user";
+ static const String registerSpeaker = "${_apiBaseUrl}register_speaker";
  static const String listSpeaker = "${_apiBaseUrl}list_speakers?email=";
  static const String listUsers = "${_apiBaseUrl}list_users";
  static const String listFriends = "${_apiBaseUrl}list_friends";
