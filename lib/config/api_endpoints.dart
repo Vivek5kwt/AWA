@@ -2,7 +2,7 @@
 part of '../core/network/http_service.dart';
 abstract final class ApiConstants {
  //live
- // static const String baseUrl = "http://172.232.104.30:8000";
+  //static const String baseUrl = "http://172.232.104.30:8000";
  //local
  static const String baseUrl = "http://192.168.1.31:5000";
  static const String googleApiKey = 'AIzaSyBtUTh-qBSF35PlyBIJVJz9SU8mj2Jn1Hw';
