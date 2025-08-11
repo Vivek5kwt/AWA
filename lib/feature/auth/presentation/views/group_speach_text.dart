@@ -576,7 +576,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         return;
       }
       if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        // Ensure proper decoding of multilingual text regardless of server headers
+        final decoded = utf8.decode(response.bodyBytes);
+        final body = jsonDecode(decoded) as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
 
         setState(() {
