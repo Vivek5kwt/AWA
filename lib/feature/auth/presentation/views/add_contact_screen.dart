@@ -512,11 +512,7 @@ class _AddContactScreenState extends State<AddContactScreen>
       SharedPreferences.getInstance().then((p) => p.setBool('add_contact_repeat_tutorial_shown', true));
       return;
     }
-    if (_isRecording) {
-      _stopRecording();
-    } else {
-      _startRecording();
-    }
+    _showSnackbar("Recording disabled", Colors.redAccent);
   }
 
   Widget _buildTutorialOverlay(BuildContext context) {
