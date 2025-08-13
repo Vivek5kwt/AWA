@@ -2102,9 +2102,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           final Color borderColor = isDark
                               ? Colors.cyanAccent.withOpacity(0.90)
                               : Colors.deepPurpleAccent.withOpacity(0.55);
+                         /* final bool identifyLocked =
+                              !_trialSkip && !_trialExists;*/
                           final bool identifyLocked =
-                              !_trialSkip && !_trialExists;
-
+                             false;
+//
                           return GestureDetector(
                             onTap: identifyLocked
                                 ? () {
@@ -2396,7 +2398,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         final borderColor = _isDarkMode
                             ? Colors.blueAccent.withOpacity(0.36)
                             : Color(0xFF80D0C7).withOpacity(0.95);
-                        final bool locked = btn['lock'] == true;
+                      //final bool locked = btn['lock'] == true;
+                        final bool locked =  false;
 
                         return AnimatedOpacity(
                           duration: const Duration(milliseconds: 420),

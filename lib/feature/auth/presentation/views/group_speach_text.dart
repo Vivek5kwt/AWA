@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
