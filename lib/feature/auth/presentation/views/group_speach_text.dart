@@ -228,6 +228,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       await _speakMyLastMessage(text);
     }
     if (_shouldAutoscroll) _scrollToBottom(animate: true);
+
+    // Restart listening to keep capturing subsequent speech input.
+    if (_isRecording) {
+      _startListening();
+    }
   }
 
   // Allow English and major Indian scripts so that Hindi or other
