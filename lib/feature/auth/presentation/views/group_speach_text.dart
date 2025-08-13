@@ -179,15 +179,39 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     return s[0].toUpperCase() + s.substring(1);
   }
 
+  String _localeIdForLanguage(String code) {
+    switch (code) {
+      case 'hi':
+        return 'hi_IN';
+      case 'pa':
+        return 'pa_IN';
+      case 'gu':
+        return 'gu_IN';
+      case 'ta':
+        return 'ta_IN';
+      case 'mr':
+        return 'mr_IN';
+      case 'bn':
+        return 'bn_IN';
+      case 'ur':
+        return 'ur_IN';
+      default:
+        return 'en_US';
+    }
+  }
+
   Future<void> _startListening() async {
     final available = await _speech.initialize();
     if (!available) return;
     setState(() {
       _isRecording = true;
     });
+    final localeId =
+        _showTextMyLanguage ? _localeIdForLanguage(_appLanguageCode) : null;
     _speech.listen(
       onResult: _onSpeechResult,
       listenMode: ListenMode.dictation,
+      localeId: localeId,
       onSoundLevelChange: (level) {
         setState(() {
           _amplitude = level * 1000;
