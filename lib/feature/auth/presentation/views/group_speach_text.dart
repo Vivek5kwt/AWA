@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
@@ -38,6 +39,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _amplitudeTimer;
   late AnimationController _micGlowController;
   final AudioRecorder _recorder = AudioRecorder();
+
+  static const String _elevenLabsApiKey =
+      String.fromEnvironment('ELEVENLABS_API_KEY', defaultValue: '');
+  static const String _elevenLabsVoiceId =
+      String.fromEnvironment('ELEVENLABS_VOICE_ID', defaultValue: '');
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   final List<Map<String, dynamic>> _messages = [];
   int _speakerIndex = 0;
@@ -142,6 +149,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
+    _audioPlayer.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -672,11 +680,37 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     if (_shouldAutoscroll) _scrollToBottom();
   }
 
+  Future<void> _speakWithElevenLabs(String msg) async {
+    if (_elevenLabsApiKey.isEmpty || _elevenLabsVoiceId.isEmpty) {
+      await _flutterTts.speak(msg);
+      return;
+    }
+    final uri =
+        Uri.parse('https://api.elevenlabs.io/v1/text-to-speech/$_elevenLabsVoiceId');
+    try {
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'xi-api-key': _elevenLabsApiKey,
+        },
+        body: jsonEncode({'text': msg}),
+      );
+      if (response.statusCode == 200) {
+        await _audioPlayer.play(BytesSource(response.bodyBytes));
+      } else {
+        await _flutterTts.speak(msg);
+      }
+    } catch (_) {
+      await _flutterTts.speak(msg);
+    }
+  }
+
   Future<void> _speakMyLastMessage(String msg) async {
     int lastIndex = _messages.lastIndexWhere(
             (m) => m['isMe'] == true && m['text'] == msg && m['spoken'] == false);
     if (lastIndex == -1) return;
-    await _flutterTts.speak(msg);
+    await _speakWithElevenLabs(msg);
 
     setState(() {
       _messages[lastIndex]['spoken'] = true;
@@ -686,7 +720,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _replaySpeak(int index) async {
     final msg = _messages[index]['text'] ?? '';
     if (msg.isNotEmpty) {
-      await _flutterTts.speak(msg);
+      await _speakWithElevenLabs(msg);
       setState(() {
         _messages[index]['spoken'] = true;
       });
