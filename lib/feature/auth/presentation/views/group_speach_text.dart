@@ -36,8 +36,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   // ===================== CONFIG =====================
   static const String _elevenLabsApiKey =
       "sk_d2492e4e5914d6db6c8fb6c0fe72a2ebd07f83bc8f06d1f4"; // <-- set your key
-  static const Duration _chunkDuration = Duration(seconds: 5);
-  static const int _minChunkBytes = 10 * 1024; // skip tiny/silent chunks
+  // shorter chunks reduce latency of speech-to-text results
+  static const Duration _chunkDuration = Duration(seconds: 2);
+  static const int _minChunkBytes = 5 * 1024; // skip tiny/silent chunks
 
   // ===================== UI / STATE =====================
   bool _isRecording = false;
@@ -389,6 +390,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   bool _isEnvironmentNoiseText(String t) {
     final text = t.toLowerCase().trim();
 
+    // Discard transcripts that are just parenthesized noise descriptions
+    if (text.startsWith('(') && text.endsWith(')')) return true;
+
     // environmental keywords (EN + Hindi)
     const env = [
       'wind', 'blowing', 'gust', 'breeze', 'fan', 'ac', 'air conditioner',
@@ -397,6 +401,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       'storm', 'thunderstorm', 'waves', 'ocean', 'sea', 'water',
       'waterfall', 'river', 'stream', 'running water', 'keyboard', 'typing',
       'footsteps', 'door closing', 'door slam', 'background music', 'music',
+      'background noise', 'machine whirring', 'machines whirring', 'machinery',
       'applause', 'clapping', 'crowd', 'crowded', 'noise', 'ambient', 'echo',
       // Hindi
       'हवा', 'तेज हवा', 'फैन', 'पंखा', 'एसी', 'ए सी', 'शोर', 'आवाज़', 'शोरगुल',
