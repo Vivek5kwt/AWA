@@ -14,7 +14,6 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 
-import '../../../../core/network/http_service.dart';
 import '../../../../core/utils/routing/routes.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
@@ -398,24 +397,34 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   Future<String> _identifySpeakerName(File file) async {
     try {
-      final uri = Uri.parse(
-          ApiConstants.identifySpeaker.endsWith('/')
-              ? ApiConstants.identifySpeaker
-              : '${ApiConstants.identifySpeaker}/');
-      final req = http.MultipartRequest('POST', uri)
-        ..fields['email'] = _email
-        ..files.add(await http.MultipartFile.fromPath('audio_file', file.path));
-      final streamed = await req.send();
-      final res = await http.Response.fromStream(streamed);
-      if (streamed.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final name = (data['name'] ?? '').toString();
-        if (name.isNotEmpty) return _capitalize(name);
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('voice_ids');
+      if (raw == null) return 'Anonymous Speaker';
+      final Map<String, dynamic> voices = jsonDecode(raw) as Map<String, dynamic>;
+      double bestScore = 0.0;
+      String bestName = 'Anonymous Speaker';
+      for (final entry in voices.entries) {
+        final uri =
+            Uri.parse('https://api.elevenlabs.io/v1/voice_verification/verify');
+        final req = http.MultipartRequest('POST', uri)
+          ..headers['xi-api-key'] = _elevenLabsApiKey
+          ..fields['voice_id'] = entry.value.toString()
+          ..files.add(await http.MultipartFile.fromPath('file', file.path));
+        final res = await http.Response.fromStream(await req.send());
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          final score = (data['similarity'] ?? 0).toDouble();
+          if (score > bestScore) {
+            bestScore = score;
+            bestName = _capitalize(entry.key);
+          }
+        }
       }
+      return bestName;
     } catch (e) {
       debugPrint('identify error: $e');
+      return 'Anonymous Speaker';
     }
-    return 'Anonymous Speaker';
   }
 
   Future<String> _getSpeakerName(int id, File file) async {
