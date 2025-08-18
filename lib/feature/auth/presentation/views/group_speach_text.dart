@@ -14,6 +14,7 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 
+import '../../../../core/network/http_service.dart';
 import '../../../../core/utils/routing/routes.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
@@ -50,6 +51,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   final TextEditingController _textController = TextEditingController();
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
+  String _email = '';
+  final Map<int, String> _speakerNames = {};
 
   final FlutterTts _flutterTts = FlutterTts();
 
@@ -183,6 +186,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     final email = prefs.getString('email') ?? 'Me';
     final name = prefs.getString('name') ?? email.split('@')[0];
     setState(() {
+      _email = email;
       _myName = _capitalize(name);
       _myColor = const Color(0xFF1E88E5);
     });
@@ -334,7 +338,20 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         final text = (data['text'] ?? '').toString().trim();
         if (_isLikelySpeech(text, data)) {
           final code = _code3ToLang((data['language_code'] ?? '').toString());
-          _addTranscriptLine(text, lang: code);
+          int spk = 0;
+          final words = data['words'] as List<dynamic>?;
+          if (words != null && words.isNotEmpty) {
+            final counts = <int, int>{};
+            for (final w in words) {
+              final sid = int.tryParse(w['speaker'].toString()) ?? 0;
+              counts[sid] = (counts[sid] ?? 0) + 1;
+            }
+            spk = counts.entries
+                .reduce((a, b) => a.value >= b.value ? a : b)
+                .key;
+          }
+          final speakerName = await _getSpeakerName(spk, file);
+          _addTranscriptLine(text, lang: code, speaker: speakerName);
         } else {
           debugPrint("Filtered as noise: $text");
         }
@@ -356,6 +373,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     final req = http.MultipartRequest("POST", uri)
       ..headers['xi-api-key'] = _elevenLabsApiKey
       ..fields['model_id'] = 'scribe_v1'
+      ..fields['diarize'] = 'true'
+      ..fields['timestamps_granularity'] = 'word'
+      ..fields['num_speakers'] = '5'
       ..files.add(await http.MultipartFile.fromPath("file", file.path));
 
     final streamed = await req.send();
@@ -374,6 +394,35 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       debugPrint("STT error ${res.statusCode}: $body");
       return null;
     }
+  }
+
+  Future<String> _identifySpeakerName(File file) async {
+    try {
+      final uri = Uri.parse(
+          ApiConstants.identifySpeaker.endsWith('/')
+              ? ApiConstants.identifySpeaker
+              : '${ApiConstants.identifySpeaker}/');
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['email'] = _email
+        ..files.add(await http.MultipartFile.fromPath('audio_file', file.path));
+      final streamed = await req.send();
+      final res = await http.Response.fromStream(streamed);
+      if (streamed.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final name = (data['name'] ?? '').toString();
+        if (name.isNotEmpty) return _capitalize(name);
+      }
+    } catch (e) {
+      debugPrint('identify error: $e');
+    }
+    return 'Anonymous Speaker';
+  }
+
+  Future<String> _getSpeakerName(int id, File file) async {
+    if (_speakerNames.containsKey(id)) return _speakerNames[id]!;
+    final name = await _identifySpeakerName(file);
+    _speakerNames[id] = name;
+    return name;
   }
 
   // ===================== HEURISTICS (no translation, stricter noise filter) =====================
@@ -522,13 +571,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   // ===================== APPENDING TRANSCRIPTS =====================
-  void _addTranscriptLine(String text, {required String lang}) async {
+  void _addTranscriptLine(String text,
+      {required String lang, required String speaker}) async {
     final line = text.trim();
     if (line.isEmpty) return;
 
     setState(() {
       _messages.add({
-        'user': 'Mic',
+        'user': speaker,
         'text': line,
         'time': TimeOfDay.now().format(context),
         'isMe': false,
