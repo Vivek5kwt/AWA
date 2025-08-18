@@ -211,7 +211,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color:
-                      isDark ? Colors.white.withOpacity(0.85) : Colors.black87,
+                  isDark ? Colors.white.withOpacity(0.85) : Colors.black87,
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
@@ -247,13 +247,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     setState(() => _trialLoading = true);
     try {
       final url =
-          Uri.parse('${ApiConstants.baseUrl}/check_trial?email=$_email');
+      Uri.parse('${ApiConstants.baseUrl}/check_trial?email=$_email');
       final resp = await http.get(url);
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
         setState(() {
-          _trialExists = data['trial_exists'] == true;
-          _trialSkip = data['trial_skipped'] == true;
+          _trialExists /*= data['trial_exists'] */== true;
+          _trialSkip /*= data['trial_skipped']*/ == true;
           _trialExpiresAt = DateTime.tryParse(data['expires_at'] ?? '');
           _trialMessage = data['message'] ?? '';
           _trialLoading = false;
@@ -369,8 +369,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         final data = jsonDecode(resp.body);
         if (mounted) {
           setState(() =>
-              _unreadNotificationCount =
-                  data['unread_notification_count'] ?? 0);
+          _unreadNotificationCount =
+              data['unread_notification_count'] ?? 0);
         }
       }
     } catch (_) {
@@ -770,11 +770,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildPlanToggle(
-    BuildContext context, {
-    required String title,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
+      BuildContext context, {
+        required String title,
+        required bool selected,
+        required VoidCallback onTap,
+      }) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -785,12 +785,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(15),
           boxShadow: selected
               ? [
-                  BoxShadow(
-                    color: Colors.amber.withOpacity(0.25),
-                    blurRadius: 6,
-                    offset: Offset(0, 2),
-                  )
-                ]
+            BoxShadow(
+              color: Colors.amber.withOpacity(0.25),
+              blurRadius: 6,
+              offset: Offset(0, 2),
+            )
+          ]
               : [],
         ),
         child: Text(
@@ -873,12 +873,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             borderRadius: BorderRadius.circular(15),
                             boxShadow: selected
                                 ? [
-                                    BoxShadow(
-                                      color: Colors.amber.withOpacity(0.25),
-                                      blurRadius: 6,
-                                      offset: Offset(0, 2),
-                                    )
-                                  ]
+                              BoxShadow(
+                                color: Colors.amber.withOpacity(0.25),
+                                blurRadius: 6,
+                                offset: Offset(0, 2),
+                              )
+                            ]
                                 : [],
                           ),
                           child: Text(
@@ -887,8 +887,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               color: selected
                                   ? Colors.white
                                   : (_isDarkMode
-                                      ? Colors.white
-                                      : Colors.black87),
+                                  ? Colors.white
+                                  : Colors.black87),
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),
@@ -940,12 +940,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           const SizedBox(height: 8),
                           ...((_selectedPlan!['features'] as List?) ?? [])
                               .map((f) => Text(
-                                    f.toString(),
-                                    style: TextStyle(
-                                      color: Colors.black54,
-                                      fontSize: 15,
-                                    ),
-                                  ))
+                            f.toString(),
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 15,
+                            ),
+                          ))
                               .toList(),
                         ],
                       ),
@@ -956,7 +956,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.amber[800],
                         padding:
-                            EdgeInsets.symmetric(horizontal: 38, vertical: 13),
+                        EdgeInsets.symmetric(horizontal: 38, vertical: 13),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -1118,13 +1118,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'desc': "Register a new speaker to begin speech identification.",
         'onTap': _trialSkip || _trialExists
             ? () => context.pushNamed(
-                  'addContact',
-                  extra: {
-                    'name': '',
-                    'phoneNumber': widget.phoneNumber,
-                    'isDarkMode': _isDarkMode
-                  },
-                )
+          'addContact',
+          extra: {
+            'name': '',
+            'phoneNumber': widget.phoneNumber,
+            'isDarkMode': _isDarkMode
+          },
+        )
             : null,
         'lock': _trialSkip ? false : !_trialExists,
       },
@@ -1135,12 +1135,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'desc': "Access your complete list of registered speakers.",
         'onTap': _trialSkip || _trialExists
             ? () => context.pushNamed(
-                  'speakerScreen',
-                  extra: {
-                    'phoneNumber': widget.phoneNumber,
-                    'isDarkMode': _isDarkMode
-                  },
-                )
+          'speakerScreen',
+          extra: {
+            'phoneNumber': widget.phoneNumber,
+            'isDarkMode': _isDarkMode
+          },
+        )
             : null,
         'lock': _trialSkip ? false : !_trialExists,
       },
@@ -1150,12 +1150,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'key': _addFriendsKey,
         'desc': "Add new friends and invite them to your network.",
         'onTap': () => context.goNamed(
-              'friendBookScreen',
-              queryParameters: {
-                'phoneNumber': widget.phoneNumber,
-                'isDarkMode': _isDarkMode.toString()
-              },
-            ),
+          'friendBookScreen',
+          queryParameters: {
+            'phoneNumber': widget.phoneNumber,
+            'isDarkMode': _isDarkMode.toString()
+          },
+        ),
         'lock': false,
       },
       {
@@ -1165,12 +1165,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'desc': "See your saved friends and manage your friend list.",
         'onTap': _trialSkip || _trialExists
             ? () => context.pushNamed(
-                  'friendListScreen',
-                  extra: {
-                    'phoneNumber': widget.phoneNumber,
-                    'isDarkMode': _isDarkMode
-                  },
-                )
+          'friendListScreen',
+          extra: {
+            'phoneNumber': widget.phoneNumber,
+            'isDarkMode': _isDarkMode
+          },
+        )
             : null,
         'lock': _trialSkip ? false : !_trialExists,
       },
@@ -1180,9 +1180,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         'key': _settingsKey,
         'desc': "Configure your app preferences and settings here.",
         'onTap': () => context.pushNamed(
-              'settingsScreen',
-              extra: {'isDarkMode': _isDarkMode},
-            ),
+          'settingsScreen',
+          extra: {'isDarkMode': _isDarkMode},
+        ),
       },
       {
         'icon': Icons.edit,
@@ -1211,9 +1211,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       builder: (context, child) {
         final bool isDark = _isDarkMode;
         final Color fabGradientStart =
-            isDark ? Color(0xFF0ED2F7) : Color(0xFF0093E9);
+        isDark ? Color(0xFF0ED2F7) : Color(0xFF0093E9);
         final Color fabGradientEnd =
-            isDark ? Color(0xFF29ECAC) : Color(0xFF80D0C7);
+        isDark ? Color(0xFF29ECAC) : Color(0xFF80D0C7);
         final Color borderColor = isDark
             ? Colors.cyanAccent.withOpacity(0.95)
             : Colors.blueAccent.withOpacity(0.95);
@@ -1303,15 +1303,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   gradient: LinearGradient(
                     colors: _isDarkMode
                         ? [
-                            Color(0xFF0F2027),
-                            Color(0xFF2C5364),
-                            Color(0xFF232526),
-                          ]
+                      Color(0xFF0F2027),
+                      Color(0xFF2C5364),
+                      Color(0xFF232526),
+                    ]
                         : [
-                            Color(0xFF0093E9),
-                            Color(0xFF80D0C7),
-                            Color(0xFFFCF6BA),
-                          ],
+                      Color(0xFF0093E9),
+                      Color(0xFF80D0C7),
+                      Color(0xFFFCF6BA),
+                    ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
@@ -1327,7 +1327,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 child: ClipRRect(
                   borderRadius:
-                      BorderRadius.vertical(bottom: Radius.circular(28)),
+                  BorderRadius.vertical(bottom: Radius.circular(28)),
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                     child: AppBar(
@@ -1341,7 +1341,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           icon: Icon(
                             Icons.menu,
                             color: _isDarkMode
-                                 ? Colors.cyanAccent
+                                ? Colors.cyanAccent
                                 : Colors.deepPurple,
                             size: 28,
                           ),
@@ -1382,15 +1382,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             shaderCallback: (bounds) => LinearGradient(
                               colors: _isDarkMode
                                   ? [
-                                      Colors.cyanAccent,
-                                      Colors.blueAccent,
-                                      Colors.white,
-                                    ]
+                                Colors.cyanAccent,
+                                Colors.blueAccent,
+                                Colors.white,
+                              ]
                                   : [
-                                      Colors.deepPurple,
-                                      Colors.indigo,
-                                      Colors.amber,
-                                    ],
+                                Colors.deepPurple,
+                                Colors.indigo,
+                                Colors.amber,
+                              ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ).createShader(bounds),
@@ -1508,7 +1508,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       shape: BoxShape.circle,
                                     ),
                                     constraints:
-                                        const BoxConstraints(minWidth: 16, minHeight: 16),
+                                    const BoxConstraints(minWidth: 16, minHeight: 16),
                                     child: Text(
                                       '$_unreadNotificationCount',
                                       style: const TextStyle(
@@ -1536,109 +1536,109 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             floatingActionButton: _isSubscribed
                 ? null
                 : Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 0),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(30),
-                            boxShadow: [
-                              BoxShadow(
-                                color: _isDarkMode
-                                    ? Colors.cyanAccent.withOpacity(0.22)
-                                    : Colors.amber.withOpacity(0.25),
-                                blurRadius: 30,
-                                spreadRadius: 1,
-                                offset: Offset(0, 8),
+              alignment: Alignment.bottomCenter,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 0),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _isDarkMode
+                              ? Colors.cyanAccent.withOpacity(0.22)
+                              : Colors.amber.withOpacity(0.25),
+                          blurRadius: 30,
+                          spreadRadius: 1,
+                          offset: Offset(0, 8),
+                        ),
+                      ],
+                      gradient: LinearGradient(
+                        colors: _isDarkMode
+                            ? [
+                          Color(0xFF21D4FD),
+                          Color(0xFF2152FF),
+                          Color(0xFF004E92),
+                        ]
+                            : [
+                          Color(0xFFF7971E),
+                          Color(0xFFFFD200),
+                          Color(0xFFFFA700),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                    ),
+                    child: FloatingActionButton.extended(
+                      heroTag: "premiumFAB",
+                      elevation: 14,
+                      backgroundColor: Colors.transparent,
+                      onPressed: _showSubscriptionDialog,
+                      icon: Icon(
+                        Icons.workspace_premium,
+                        color: _isDarkMode
+                            ? Colors.cyanAccent
+                            : Colors.amberAccent,
+                        size: 32,
+                        shadows: [
+                          Shadow(
+                            color: _isDarkMode
+                                ? Colors.cyanAccent.withOpacity(0.4)
+                                : Colors.amberAccent.withOpacity(0.44),
+                            blurRadius: 6,
+                            offset: Offset(0, 1),
+                          )
+                        ],
+                      ),
+                      label: ShaderMask(
+                        shaderCallback: (bounds) {
+                          return LinearGradient(
+                            colors: _isDarkMode
+                                ? [
+                              Colors.cyanAccent,
+                              Colors.blueAccent,
+                              Colors.white
+                            ]
+                                : [
+                              Colors.orangeAccent,
+                              Colors.amber,
+                              Colors.yellow
+                            ],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ).createShader(
+                            Rect.fromLTWH(
+                                0, 0, bounds.width, bounds.height),
+                          );
+                        },
+                        blendMode: BlendMode.srcIn,
+                        child: Text(
+                          context.loc.goPremium,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            letterSpacing: 1.3,
+                            color: Colors.white,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withOpacity(0.17),
+                                blurRadius: 2,
+                                offset: Offset(0, 2),
                               ),
                             ],
-                            gradient: LinearGradient(
-                              colors: _isDarkMode
-                                  ? [
-                                      Color(0xFF21D4FD),
-                                      Color(0xFF2152FF),
-                                      Color(0xFF004E92),
-                                    ]
-                                  : [
-                                      Color(0xFFF7971E),
-                                      Color(0xFFFFD200),
-                                      Color(0xFFFFA700),
-                                    ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                          ),
-                          child: FloatingActionButton.extended(
-                            heroTag: "premiumFAB",
-                            elevation: 14,
-                            backgroundColor: Colors.transparent,
-                            onPressed: _showSubscriptionDialog,
-                            icon: Icon(
-                              Icons.workspace_premium,
-                              color: _isDarkMode
-                                  ? Colors.cyanAccent
-                                  : Colors.amberAccent,
-                              size: 32,
-                              shadows: [
-                                Shadow(
-                                  color: _isDarkMode
-                                      ? Colors.cyanAccent.withOpacity(0.4)
-                                      : Colors.amberAccent.withOpacity(0.44),
-                                  blurRadius: 6,
-                                  offset: Offset(0, 1),
-                                )
-                              ],
-                            ),
-                            label: ShaderMask(
-                              shaderCallback: (bounds) {
-                                return LinearGradient(
-                                  colors: _isDarkMode
-                                      ? [
-                                          Colors.cyanAccent,
-                                          Colors.blueAccent,
-                                          Colors.white
-                                        ]
-                                      : [
-                                          Colors.orangeAccent,
-                                          Colors.amber,
-                                          Colors.yellow
-                                        ],
-                                  begin: Alignment.centerLeft,
-                                  end: Alignment.centerRight,
-                                ).createShader(
-                                  Rect.fromLTWH(
-                                      0, 0, bounds.width, bounds.height),
-                                );
-                              },
-                              blendMode: BlendMode.srcIn,
-                              child: Text(
-                                context.loc.goPremium,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  letterSpacing: 1.3,
-                                  color: Colors.white,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black.withOpacity(0.17),
-                                      blurRadius: 2,
-                                      offset: Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
                           ),
                         ),
                       ),
-                    ],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
                   ),
+                ),
+              ],
+            ),
             floatingActionButtonLocation:
-                FloatingActionButtonLocation.centerFloat,
+            FloatingActionButtonLocation.centerFloat,
           ),
           supportFAB,
         ],
@@ -1651,23 +1651,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       decoration: BoxDecoration(
         gradient: _isDarkMode
             ? const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF181A20),
-                  Color(0xFF232526),
-                  Color(0xFF181A20),
-                ],
-              )
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF181A20),
+            Color(0xFF232526),
+            Color(0xFF181A20),
+          ],
+        )
             : const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF0093E9),
-                  Color(0xFF80D0C7),
-                  Color(0xFFFCF6BA),
-                ],
-              ),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF0093E9),
+            Color(0xFF80D0C7),
+            Color(0xFFFCF6BA),
+          ],
+        ),
       ),
       child: SafeArea(
         child: Column(
@@ -1752,240 +1752,240 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 child: ListView(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   children: [
-                  GlassmorphicContainer(
-                    width: double.infinity,
-                    height: 200,
-                    borderRadius: 0,
-                    blur: 12,
-                    border: 0,
-                    linearGradient: LinearGradient(
-                      colors: [
-                        _isDarkMode
-                            ? Colors.white.withOpacity(0.04)
-                            : Colors.white.withOpacity(0.24),
-                        _isDarkMode
-                            ? Colors.white.withOpacity(0.01)
-                            : Colors.white.withOpacity(0.10),
-                      ],
-                    ),
-                    borderGradient: LinearGradient(
-                      colors: [
-                        _isDarkMode ? Colors.white24 : Colors.white,
-                        Colors.transparent,
-                      ],
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
-                            onTap: _pickImage,
-                            child: Hero(
-                              tag: 'profilePic',
-                              child: Container(
-                                margin: const EdgeInsets.only(left: 28),
-                                height: 82,
-                                width: 82,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  boxShadow: !_isDarkMode
-                                      ? [
-                                          BoxShadow(
-                                            color: Colors.deepPurpleAccent
-                                                .withOpacity(0.13),
-                                            blurRadius: 14,
-                                            spreadRadius: 2,
-                                          ),
-                                        ]
-                                      : [],
-                                ),
-                                child: ClipOval(
-                                  child: _pickedImage != null
-                                      ? Image.file(
-                                          File(_pickedImage!.path),
-                                          fit: BoxFit.cover,
-                                        )
-                                      : _profilePic.isNotEmpty
-                                          ? Image.network(
-                                              ApiConstants.baseUrl +
-                                                  _profilePic,
-                                              fit: BoxFit.cover,
-                                              loadingBuilder:
-                                                  (context, child, progress) {
-                                                if (progress == null)
-                                                  return child;
-                                                return const Center(
-                                                  child:
-                                                      CircularProgressIndicator(),
-                                                );
-                                              },
-                                              errorBuilder:
-                                                  (context, error, _) =>
-                                                      const Icon(
-                                                Icons.error_outline,
-                                                color: Colors.white54,
-                                                size: 36,
-                                              ),
-                                            )
-                                          : Container(
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                gradient: LinearGradient(
-                                                  begin: Alignment.topLeft,
-                                                  end: Alignment.bottomRight,
-                                                  colors: _isDarkMode
-                                                      ? [
-                                                          Colors.grey.shade800,
-                                                          Colors.grey.shade700
-                                                        ]
-                                                      : [
-                                                          Colors.blueAccent
-                                                              .withOpacity(0.8),
-                                                          Colors.lightBlueAccent
-                                                        ],
-                                                ),
-                                              ),
-                                              child: Center(
-                                                child: Column(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.center,
-                                                  children: [
-                                                    Icon(
-                                                      Icons.person_add_alt_1,
-                                                      size: 32,
-                                                      color: Colors.white,
-                                                    ),
-                                                    const SizedBox(height: 4),
-                                                    Text(
-                                                      context.loc.addPhoto,
-                                                      style: TextStyle(
-                                                        color: Colors.white70,
-                                                        fontSize: 10,
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Padding(
-                            padding: const EdgeInsets.only(left: 28),
-                            child: Text(
-                              '${context.loc.helloWorld}, $_userName',
-                              style: TextStyle(
-                                color:
-                                    _isDarkMode ? Colors.white : Colors.black,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(left: 28),
-                            child: Text(
-                              _loginType == '0' ? _email : _mobileNumber,
-                              style: TextStyle(
-                                color: _isDarkMode
-                                    ? Colors.white70
-                                    : Colors.black54,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
+                    GlassmorphicContainer(
+                      width: double.infinity,
+                      height: 200,
+                      borderRadius: 0,
+                      blur: 12,
+                      border: 0,
+                      linearGradient: LinearGradient(
+                        colors: [
+                          _isDarkMode
+                              ? Colors.white.withOpacity(0.04)
+                              : Colors.white.withOpacity(0.24),
+                          _isDarkMode
+                              ? Colors.white.withOpacity(0.01)
+                              : Colors.white.withOpacity(0.10),
                         ],
                       ),
-                    ),
-                  ),
-                  Theme(
-                    data: Theme.of(context).copyWith(
-                      unselectedWidgetColor:
-                          _isDarkMode ? Colors.white : Colors.black,
-                      switchTheme: SwitchThemeData(
-                        trackColor: MaterialStateProperty.resolveWith<Color>(
-                          (_) {
-                            return _isDarkMode
-                                ? const Color(0xFF232526)
-                                : Colors.grey;
-                          },
-                        ),
-                        thumbColor: MaterialStateProperty.resolveWith<Color>(
-                          (_) {
-                            return _isDarkMode
-                                ? Colors.white
-                                : Colors.purpleAccent;
-                          },
+                      borderGradient: LinearGradient(
+                        colors: [
+                          _isDarkMode ? Colors.white24 : Colors.white,
+                          Colors.transparent,
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            GestureDetector(
+                              onTap: _pickImage,
+                              child: Hero(
+                                tag: 'profilePic',
+                                child: Container(
+                                  margin: const EdgeInsets.only(left: 28),
+                                  height: 82,
+                                  width: 82,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    boxShadow: !_isDarkMode
+                                        ? [
+                                      BoxShadow(
+                                        color: Colors.deepPurpleAccent
+                                            .withOpacity(0.13),
+                                        blurRadius: 14,
+                                        spreadRadius: 2,
+                                      ),
+                                    ]
+                                        : [],
+                                  ),
+                                  child: ClipOval(
+                                    child: _pickedImage != null
+                                        ? Image.file(
+                                      File(_pickedImage!.path),
+                                      fit: BoxFit.cover,
+                                    )
+                                        : _profilePic.isNotEmpty
+                                        ? Image.network(
+                                      ApiConstants.baseUrl +
+                                          _profilePic,
+                                      fit: BoxFit.cover,
+                                      loadingBuilder:
+                                          (context, child, progress) {
+                                        if (progress == null)
+                                          return child;
+                                        return const Center(
+                                          child:
+                                          CircularProgressIndicator(),
+                                        );
+                                      },
+                                      errorBuilder:
+                                          (context, error, _) =>
+                                      const Icon(
+                                        Icons.error_outline,
+                                        color: Colors.white54,
+                                        size: 36,
+                                      ),
+                                    )
+                                        : Container(
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: _isDarkMode
+                                              ? [
+                                            Colors.grey.shade800,
+                                            Colors.grey.shade700
+                                          ]
+                                              : [
+                                            Colors.blueAccent
+                                                .withOpacity(0.8),
+                                            Colors.lightBlueAccent
+                                          ],
+                                        ),
+                                      ),
+                                      child: Center(
+                                        child: Column(
+                                          mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              Icons.person_add_alt_1,
+                                              size: 32,
+                                              color: Colors.white,
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              context.loc.addPhoto,
+                                              style: TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 10,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 28),
+                              child: Text(
+                                '${context.loc.helloWorld}, $_userName',
+                                style: TextStyle(
+                                  color:
+                                  _isDarkMode ? Colors.white : Colors.black,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.only(left: 28),
+                              child: Text(
+                                _loginType == '0' ? _email : _mobileNumber,
+                                style: TextStyle(
+                                  color: _isDarkMode
+                                      ? Colors.white70
+                                      : Colors.black54,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    child: SwitchListTile(
-                      title: Text(
-                        context.loc.darkMode,
-                        style: TextStyle(
+                    Theme(
+                      data: Theme.of(context).copyWith(
+                        unselectedWidgetColor:
+                        _isDarkMode ? Colors.white : Colors.black,
+                        switchTheme: SwitchThemeData(
+                          trackColor: MaterialStateProperty.resolveWith<Color>(
+                                (_) {
+                              return _isDarkMode
+                                  ? const Color(0xFF232526)
+                                  : Colors.grey;
+                            },
+                          ),
+                          thumbColor: MaterialStateProperty.resolveWith<Color>(
+                                (_) {
+                              return _isDarkMode
+                                  ? Colors.white
+                                  : Colors.purpleAccent;
+                            },
+                          ),
+                        ),
+                      ),
+                      child: SwitchListTile(
+                        title: Text(
+                          context.loc.darkMode,
+                          style: TextStyle(
+                            color: _isDarkMode ? Colors.white : Colors.black,
+                          ),
+                        ),
+                        value: _isDarkMode,
+                        onChanged: _toggleDarkMode,
+                        secondary: Icon(
+                          Icons.brightness_6,
                           color: _isDarkMode ? Colors.white : Colors.black,
                         ),
+                        activeColor: Theme.of(context).primaryColor,
+                        inactiveThumbColor: Theme.of(context).primaryColor,
+                        inactiveTrackColor:
+                        Theme.of(context).primaryColor.withOpacity(0.4),
                       ),
-                      value: _isDarkMode,
-                      onChanged: _toggleDarkMode,
-                      secondary: Icon(
-                        Icons.brightness_6,
-                        color: _isDarkMode ? Colors.white : Colors.black,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                      child: CustomLanguageDropdown(
+                        isDarkMode: _isDarkMode,
+                        selectedLanguage: _selectedLanguage,
+                        languages: _languages,
+                        text: context.loc.language,
+                        onChanged: (lang) => _changeLanguage(lang),
                       ),
-                      activeColor: Theme.of(context).primaryColor,
-                      inactiveThumbColor: Theme.of(context).primaryColor,
-                      inactiveTrackColor:
-                          Theme.of(context).primaryColor.withOpacity(0.4),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                    child: CustomLanguageDropdown(
-                      isDarkMode: _isDarkMode,
-                      selectedLanguage: _selectedLanguage,
-                      languages: _languages,
-                      text: context.loc.language,
-                      onChanged: (lang) => _changeLanguage(lang),
-                    ),
-                  ),
 
-                  Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
-                  const SizedBox(height: 15),
-                  Center(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(30),
-                      child: Image.asset(
-                        'assets/images/awa_logo.webp',
-                        height: 100,
-                        width: 100,
-                        fit: BoxFit.contain,
+                    Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
+                    const SizedBox(height: 15),
+                    Center(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(30),
+                        child: Image.asset(
+                          'assets/images/awa_logo.webp',
+                          height: 100,
+                          width: 100,
+                          fit: BoxFit.contain,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 15),
-                  Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
-                  ListTile(
-                    leading: Icon(Icons.exit_to_app,
-                        color: _isDarkMode ? Colors.white : Colors.black),
-                    title: Text(context.loc.logout,
-                        style: TextStyle(
-                            color: _isDarkMode ? Colors.white : Colors.black)),
-                    onTap: _logout,
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.delete_forever,
-                        color: Colors.redAccent),
-                    title: Text(context.loc.deleteAccount,
-                        style: const TextStyle(color: Colors.redAccent)),
-                    onTap: _deleteAccount,
-                  ),
-                  const SizedBox(height: 10),
-                ],
-              ),
-            ),),
+                    const SizedBox(height: 15),
+                    Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
+                    ListTile(
+                      leading: Icon(Icons.exit_to_app,
+                          color: _isDarkMode ? Colors.white : Colors.black),
+                      title: Text(context.loc.logout,
+                          style: TextStyle(
+                              color: _isDarkMode ? Colors.white : Colors.black)),
+                      onTap: _logout,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.delete_forever,
+                          color: Colors.redAccent),
+                      title: Text(context.loc.deleteAccount,
+                          style: const TextStyle(color: Colors.redAccent)),
+                      onTap: _deleteAccount,
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                ),
+              ),),
           ],
         ),
       ),
@@ -2022,7 +2022,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: AnimatedSlide(
                     duration: const Duration(milliseconds: 420),
                     offset:
-                        _itemVisible[0] ? Offset.zero : const Offset(0, -0.15),
+                    _itemVisible[0] ? Offset.zero : const Offset(0, -0.15),
                     child: AspectRatio(
                       aspectRatio: 16 / 9,
                       child: LayoutBuilder(
@@ -2038,9 +2038,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               colors: _isDarkMode
                                   ? [Color(0xFF232526), Color(0xFF181A20)]
                                   : [
-                                      Colors.white.withOpacity(0.20),
-                                      Colors.white.withOpacity(0.09)
-                                    ],
+                                Colors.white.withOpacity(0.20),
+                                Colors.white.withOpacity(0.09)
+                              ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
@@ -2048,9 +2048,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               colors: _isDarkMode
                                   ? [Colors.white12, Colors.transparent]
                                   : [
-                                      Colors.deepPurpleAccent.withOpacity(0.16),
-                                      Colors.blueAccent.withOpacity(0.07)
-                                    ],
+                                Colors.deepPurpleAccent.withOpacity(0.16),
+                                Colors.blueAccent.withOpacity(0.07)
+                              ],
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(26),
@@ -2082,12 +2082,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: AnimatedSlide(
                     duration: const Duration(milliseconds: 600),
                     offset:
-                        _itemVisible[1] ? Offset.zero : const Offset(0, -0.12),
+                    _itemVisible[1] ? Offset.zero : const Offset(0, -0.12),
                     child: Showcase(
                       key: _identifySpeakerKey,
                       title: "Identify Speaker",
                       description:
-                          "Tap here to identify the speaker in real time.",
+                      "Tap here to identify the speaker in real time.",
                       descriptionPadding: EdgeInsets.all(6),
                       child: AnimatedBuilder(
                         animation: _glowAnim,
@@ -2096,72 +2096,74 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           final bool isDark = _isDarkMode;
 
                           final Color gradientStart =
-                              isDark ? Color(0xFF0ED2F7) : Color(0xFF0093E9);
+                          isDark ? Color(0xFF0ED2F7) : Color(0xFF0093E9);
                           final Color gradientEnd =
-                              isDark ? Color(0xFF29ECAC) : Color(0xFF80D0C7);
+                          isDark ? Color(0xFF29ECAC) : Color(0xFF80D0C7);
                           final Color borderColor = isDark
                               ? Colors.cyanAccent.withOpacity(0.90)
                               : Colors.deepPurpleAccent.withOpacity(0.55);
+                          /* final bool identifyLocked =
+                              !_trialSkip && !_trialExists;*/
                           final bool identifyLocked =
-                              !_trialSkip && !_trialExists;
-
+                          false;
+//
                           return GestureDetector(
                             onTap: identifyLocked
                                 ? () {
-                                    showDialog(
-                                      context: context,
-                                      builder: (_) => AlertDialog(
-                                        backgroundColor: _isDarkMode
-                                            ? Colors.grey[900]
-                                            : Colors.white,
-                                        title: Row(
-                                          children: [
-                                            Icon(Icons.lock_outline,
-                                                color: Colors.redAccent),
-                                            SizedBox(width: 8),
-                                            Text("Trial Ended",
-                                                style: TextStyle(
-                                                  color: _isDarkMode
-                                                      ? Colors.white
-                                                      : Colors.redAccent,
-                                                  fontWeight: FontWeight.bold,
-                                                )),
-                                          ],
-                                        ),
-                                        content: Text(
-                                          _trialMessage ??
-                                              "Your free trial has expired. Please subscribe to continue using this feature.",
+                              showDialog(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  backgroundColor: _isDarkMode
+                                      ? Colors.grey[900]
+                                      : Colors.white,
+                                  title: Row(
+                                    children: [
+                                      Icon(Icons.lock_outline,
+                                          color: Colors.redAccent),
+                                      SizedBox(width: 8),
+                                      Text("Trial Ended",
                                           style: TextStyle(
                                             color: _isDarkMode
-                                                ? Colors.white70
-                                                : Colors.black87,
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () {
-                                              Navigator.pop(context);
-                                              _showSubscriptionDialog();
-                                            },
-                                            child: Text(
-                                              "Upgrade Now",
-                                              style: TextStyle(
-                                                color: Colors.amber[800],
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }
-                                : () => context.pushNamed(
-                                      'identifySpeakerScreen',
-                                      extra: {
-                                        'isDarkMode': _isDarkMode,
-                                        'phoneNumber': widget.phoneNumber,
-                                      },
+                                                ? Colors.white
+                                                : Colors.redAccent,
+                                            fontWeight: FontWeight.bold,
+                                          )),
+                                    ],
+                                  ),
+                                  content: Text(
+                                    _trialMessage ??
+                                        "Your free trial has expired. Please subscribe to continue using this feature.",
+                                    style: TextStyle(
+                                      color: _isDarkMode
+                                          ? Colors.white70
+                                          : Colors.black87,
                                     ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        _showSubscriptionDialog();
+                                      },
+                                      child: Text(
+                                        "Upgrade Now",
+                                        style: TextStyle(
+                                          color: Colors.amber[800],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                                : () => context.pushNamed(
+                              'identifySpeakerScreen',
+                              extra: {
+                                'isDarkMode': _isDarkMode,
+                                'phoneNumber': widget.phoneNumber,
+                              },
+                            ),
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
@@ -2169,7 +2171,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   width: double.infinity,
                                   height: 62,
                                   margin:
-                                      const EdgeInsets.symmetric(vertical: 8),
+                                  const EdgeInsets.symmetric(vertical: 8),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(38),
                                     gradient: LinearGradient(
@@ -2207,7 +2209,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   width: double.infinity,
                                   height: 62,
                                   margin:
-                                      const EdgeInsets.symmetric(vertical: 8),
+                                  const EdgeInsets.symmetric(vertical: 8),
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(38),
                                     border: Border.all(
@@ -2238,15 +2240,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                             BoxShadow(
                                               color: isDark
                                                   ? Colors.cyanAccent
-                                                      .withOpacity(0.19 +
-                                                          _glowAnim.value *
-                                                              0.08)
+                                                  .withOpacity(0.19 +
+                                                  _glowAnim.value *
+                                                      0.08)
                                                   : Colors.deepPurpleAccent
-                                                      .withOpacity(0.12 +
-                                                          _glowAnim.value *
-                                                              0.07),
+                                                  .withOpacity(0.12 +
+                                                  _glowAnim.value *
+                                                      0.07),
                                               blurRadius:
-                                                  18 + 9 * _glowAnim.value,
+                                              18 + 9 * _glowAnim.value,
                                               offset: Offset(0, 2),
                                             ),
                                           ],
@@ -2342,7 +2344,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: GridView.builder(
                       itemCount: buttons.length,
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
+                      const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
                         mainAxisSpacing: 12,
                         crossAxisSpacing: 12,
@@ -2354,49 +2356,50 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                         final List<Color> boxGradientColors = _isDarkMode
                             ? [
-                                Color(0xFF232526),
-                                Color(0xFF414345),
-                                Color(0xFF181A20),
-                              ]
+                          Color(0xFF232526),
+                          Color(0xFF414345),
+                          Color(0xFF181A20),
+                        ]
                             : [
-                                Color(0xFF0093E9),
-                                Color(0xFF80D0C7),
-                                Color(0xFFFCF6BA),
-                              ];
+                          Color(0xFF0093E9),
+                          Color(0xFF80D0C7),
+                          Color(0xFFFCF6BA),
+                        ];
 
                         final List<BoxShadow> boxShadows = _isDarkMode
                             ? [
-                                BoxShadow(
-                                  color: Colors.blueGrey.shade900
-                                      .withOpacity(0.42),
-                                  blurRadius: 32,
-                                  spreadRadius: 2,
-                                  offset: Offset(0, 10),
-                                ),
-                                BoxShadow(
-                                  color: Colors.amber.withOpacity(0.14),
-                                  blurRadius: 18,
-                                  offset: Offset(-3, 6),
-                                ),
-                              ]
+                          BoxShadow(
+                            color: Colors.blueGrey.shade900
+                                .withOpacity(0.42),
+                            blurRadius: 32,
+                            spreadRadius: 2,
+                            offset: Offset(0, 10),
+                          ),
+                          BoxShadow(
+                            color: Colors.amber.withOpacity(0.14),
+                            blurRadius: 18,
+                            offset: Offset(-3, 6),
+                          ),
+                        ]
                             : [
-                                BoxShadow(
-                                  color: Color(0xFF0093E9).withOpacity(0.38),
-                                  blurRadius: 32,
-                                  spreadRadius: 2,
-                                  offset: Offset(0, 10),
-                                ),
-                                BoxShadow(
-                                  color: Color(0xFFFCF6BA).withOpacity(0.16),
-                                  blurRadius: 20,
-                                  offset: Offset(-2, 3),
-                                ),
-                              ];
+                          BoxShadow(
+                            color: Color(0xFF0093E9).withOpacity(0.38),
+                            blurRadius: 32,
+                            spreadRadius: 2,
+                            offset: Offset(0, 10),
+                          ),
+                          BoxShadow(
+                            color: Color(0xFFFCF6BA).withOpacity(0.16),
+                            blurRadius: 20,
+                            offset: Offset(-2, 3),
+                          ),
+                        ];
 
                         final borderColor = _isDarkMode
                             ? Colors.blueAccent.withOpacity(0.36)
                             : Color(0xFF80D0C7).withOpacity(0.95);
-                        final bool locked = btn['lock'] == true;
+                        //final bool locked = btn['lock'] == true;
+                        final bool locked =  false;
 
                         return AnimatedOpacity(
                           duration: const Duration(milliseconds: 420),
@@ -2440,66 +2443,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                   ),
                                   InkWell(
                                     borderRadius: BorderRadius.circular(26),
-                                    onTap: locked
-                                        ? () {
-                                            showDialog(
-                                              context: context,
-                                              builder: (_) => AlertDialog(
-                                                backgroundColor: _isDarkMode
-                                                    ? Colors.grey[900]
-                                                    : Colors.white,
-                                                title: Row(
-                                                  children: [
-                                                    Icon(Icons.lock_outline,
-                                                        color:
-                                                            Colors.redAccent),
-                                                    SizedBox(width: 8),
-                                                    Text("Trial Ended",
-                                                        style: TextStyle(
-                                                          color: _isDarkMode
-                                                              ? Colors.white
-                                                              : Colors
-                                                                  .redAccent,
-                                                          fontWeight:
-                                                              FontWeight.bold,
-                                                        )),
-                                                  ],
-                                                ),
-                                                content: Text(
-                                                  _trialMessage ??
-                                                      "Your free trial has expired. Please subscribe to continue using this feature.",
-                                                  style: TextStyle(
-                                                    color: _isDarkMode
-                                                        ? Colors.white70
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () {
-                                                      Navigator.pop(context);
-                                                      _showSubscriptionDialog();
-                                                    },
-                                                    child: Text(
-                                                      "Upgrade Now",
-                                                      style: TextStyle(
-                                                        color:
-                                                            Colors.amber[800],
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                          }
-                                        : btn['onTap'] as VoidCallback?,
+                                    onTap:  btn['onTap'] as VoidCallback?,
                                     child: Opacity(
                                       opacity: locked ? 0.5 : 1.0,
                                       child: Column(
                                         mainAxisAlignment:
-                                            MainAxisAlignment.center,
+                                        MainAxisAlignment.center,
                                         children: [
                                           Icon(
                                             btn['icon'] as IconData,
@@ -2520,8 +2469,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                               color: locked
                                                   ? Colors.redAccent
                                                   : Theme.of(context)
-                                                      .colorScheme
-                                                      .onPrimary,
+                                                  .colorScheme
+                                                  .onPrimary,
                                               fontWeight: FontWeight.bold,
                                               shadows: [
                                                 Shadow(
