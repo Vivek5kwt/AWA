@@ -555,15 +555,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               continue;
             }
 
+            final isMe = name.trim().toLowerCase() ==
+                _myName.trim().toLowerCase();
             _messages.add({
               'user': name,
               'text': text,
               'time': time,
-              'isMe': false,
+              'isMe': isMe,
               'spoken': false,
               'audioLabel': label,
             });
-            _latestSentence = text;
+            _latestSentence = '$name: $text';
             _latestSentenceTimer?.cancel();
             _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
               setState(() {
@@ -612,7 +614,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         'spoken': false,
       });
       _textController.clear();
-      _latestSentence = msg;
+      _latestSentence = '$_myName: $msg';
       _latestSentenceTimer?.cancel();
       _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
         setState(() {
