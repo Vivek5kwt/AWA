@@ -37,11 +37,11 @@ abstract final class ApiConstants {
  static const String getTransaction = "${_apiBaseUrl}get_transactions_by_email";
 
 // ElevenLabs endpoints
-static const String elevenLabsApiKey = 'YOUR_ELEVENLABS_API_KEY';
+static const String elevenLabsApiKey = 'sk_01a87d73ba133e530ecab10f160cb0f4a98bdaad75449fc5';
 static const String _elevenLabsBaseUrl = 'https://api.elevenlabs.io/v1';
 static const String listElevenLabsVoices = "${_elevenLabsBaseUrl}/voices";
 static const String elevenLabsSpeechToText =
     "${_elevenLabsBaseUrl}/speech-to-text";
-static const String elevenLabsModelId = 'eleven_monolingual_v1';
+static const String elevenLabsModelId = 'scribe_v1';
 static const String elevenLabsLanguage = 'en';
 }

@@ -38,7 +38,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     "can you please repeat that",
     "i will call you later."
   ];
-  static const String _elevenLabsApiKey = 'sk_d2492e4e5914d6db6c8fb6c0fe72a2ebd07f83bc8f06d1f4';
+  static const String _elevenLabsApiKey = ApiConstants.elevenLabsApiKey;
   final List<String> _recordings = [];
   int _currentIndex = 0;
   bool _isRecording = false;
