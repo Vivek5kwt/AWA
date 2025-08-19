@@ -433,6 +433,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       Uri.parse(ApiConstants.elevenLabsSpeechToText),
     )
       ..headers['xi-api-key'] = ApiConstants.elevenLabsApiKey
+      ..fields['model_id'] = ApiConstants.elevenLabsModelId
+      ..fields['language'] = ApiConstants.elevenLabsLanguage
       ..files.add(
         await http.MultipartFile.fromPath(
           'file',
