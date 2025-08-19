@@ -50,6 +50,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   final TextEditingController _textController = TextEditingController();
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
+  String _email = '';
 
   final FlutterTts _flutterTts = FlutterTts();
 
@@ -116,6 +117,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   Future<void> _loadPreviousMessages() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? '';
+    _email = email;
     final doc = await _firestore
         .collection('meeting_histories')
         .doc('user_$email')
@@ -185,6 +187,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     setState(() {
       _myName = _capitalize(name);
       _myColor = const Color(0xFF1E88E5);
+      _email = email;
     });
   }
 
@@ -326,6 +329,29 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     }
   }
 
+  Future<String?> _identifySpeaker(File file) async {
+    try {
+      final uri = Uri.parse(ApiConstants.identifySpeakerNative);
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['email'] = _email
+        ..files.add(await http.MultipartFile.fromPath('file', file.path));
+
+      final streamed = await req.send();
+      final res = await http.Response.fromStream(streamed);
+      debugPrint('Identify speaker → ${res.statusCode}');
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final name = data['speaker'] ?? data['name'];
+        return name?.toString();
+      } else {
+        debugPrint('Identify error ${res.statusCode}: ${res.body}');
+      }
+    } catch (e) {
+      debugPrint('Identify exception: $e');
+    }
+    return null;
+  }
+
   // ===================== STT (AUTO-DETECT ONLY) =====================
   Future<void> _transcribeAuto(File file) async {
     try {
@@ -337,7 +363,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
           if (_isLikelySpeech(text, data)) {
             final code =
                 _code3ToLang((data['language_code'] ?? '').toString());
-            _addTranscriptLine(text, lang: code);
+            final speaker = await _identifySpeaker(file) ?? 'Mic';
+            _addTranscriptLine(text, lang: code, speaker: speaker);
           }
         } else {
           debugPrint("STT returned empty text.");
@@ -534,16 +561,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   // ===================== APPENDING TRANSCRIPTS =====================
-  void _addTranscriptLine(String text, {required String lang}) async {
+  void _addTranscriptLine(String text,
+      {required String lang, required String speaker}) async {
     final line = text.trim();
     if (line.isEmpty) return;
 
     setState(() {
       _messages.add({
-        'user': 'Mic',
+        'user': speaker,
         'text': line,
         'time': TimeOfDay.now().format(context),
-        'isMe': false,
+        'isMe': speaker.toLowerCase() == _myName.toLowerCase(),
         'spoken': false,
       });
       _latestSentence = line;
