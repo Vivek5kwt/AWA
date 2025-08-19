@@ -38,7 +38,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     "can you please repeat that",
     "i will call you later."
   ];
-  static const String _elevenLabsApiKey = 'YOUR_ELEVENLABS_API_KEY';
+  static const String _elevenLabsApiKey = 'sk_d2492e4e5914d6db6c8fb6c0fe72a2ebd07f83bc8f06d1f4';
   final List<String> _recordings = [];
   int _currentIndex = 0;
   bool _isRecording = false;
@@ -492,6 +492,7 @@ class _AddContactScreenState extends State<AddContactScreen>
       req.files.add(await http.MultipartFile.fromPath('files', p));
     }
     final res = await http.Response.fromStream(await req.send());
+    print('dsjdjhsd ${res.statusCode}');
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final voiceId = data['voice_id']?.toString();
