@@ -39,7 +39,10 @@ abstract final class ApiConstants {
 // ElevenLabs endpoints
 static const String elevenLabsApiKey = 'sk_01a87d73ba133e530ecab10f160cb0f4a98bdaad75449fc5';
 static const String _elevenLabsBaseUrl = 'https://api.elevenlabs.io/v1';
-static const String listElevenLabsVoices = "${_elevenLabsBaseUrl}/voices";
+// Base path for ElevenLabs voices collection
+static const String elevenLabsVoices = "${_elevenLabsBaseUrl}/voices";
+// List voices endpoint (same as [elevenLabsVoices])
+static const String listElevenLabsVoices = elevenLabsVoices;
 static const String elevenLabsSpeechToText =
     "${_elevenLabsBaseUrl}/speech-to-text";
 static const String elevenLabsModelId = 'scribe_v1';
