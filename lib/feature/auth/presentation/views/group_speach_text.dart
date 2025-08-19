@@ -384,220 +384,70 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedEmail = prefs.getString('email') ?? '';
-
-    Uri uri = Uri.parse(
-      '${ApiConstants.baseUrl}/identify_speaker?email=$storedEmail&label=$label',
-    );
-    void showAccountDeletedDialog() {
-      showGeneralDialog(
-        context: context,
-        barrierDismissible: false,
-        barrierLabel: "accountDeleted",
-        pageBuilder: (ctx, _, __) => WillPopScope(
-          onWillPop: () async => false,
-          child: Container(
-            color: widget.isDarkMode ? Color(0xFF181A20) : Color(0xFFFCF6BA),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                child: Material(
-                  borderRadius: BorderRadius.circular(26),
-                  color: widget.isDarkMode
-                      ? Colors.blueGrey[900]!.withOpacity(0.98)
-                      : Colors.white.withOpacity(0.97),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(30),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.block_rounded,
-                          color: widget.isDarkMode
-                              ? Colors.cyanAccent
-                              : Colors.deepPurpleAccent,
-                          size: 55,
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          "Your account has been blocked",
-                          style: TextStyle(
-                            color: widget.isDarkMode
-                                ? Colors.cyanAccent
-                                : Colors.deepPurpleAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                            letterSpacing: 1.1,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          "For security reasons, your account was blocked by admin. Please contact our support team for assistance.",
-                          style: TextStyle(
-                            color: widget.isDarkMode
-                                ? Colors.white70
-                                : Colors.blueGrey.shade700,
-                            fontSize: 16,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 26),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: widget.isDarkMode
-                                ? Colors.cyanAccent.withOpacity(0.85)
-                                : Colors.deepPurpleAccent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 38, vertical: 14),
-                          ),
-                          icon: Icon(
-                            Icons.support_agent_rounded,
-                            color: widget.isDarkMode ? Colors.black : Colors.white,
-                            size: 26,
-                          ),
-                          label: Text(
-                            "Contact Support",
-                            style: TextStyle(
-                                color: widget.isDarkMode
-                                    ? Colors.black
-                                    : Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 17.3),
-                          ),
-                          onPressed: () {
-                            context.go(Routes.login);
-                          },
-                        ),
-                        const SizedBox(height: 15),
-                        TextButton(
-                            onPressed: () {
-                              context.go(Routes.login);
-                            },
-                            child: Text(
-                              "Exit App",
-                              style: TextStyle(
-                                  color: widget.isDarkMode
-                                      ? Colors.cyanAccent
-                                      : Colors.deepPurpleAccent,
-                                  fontSize: 15.5,
-                                  fontWeight: FontWeight.bold),
-                            )
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    Future<http.StreamedResponse> sendRequest(Uri targetUri) {
-      final request = http.MultipartRequest('POST', targetUri)
-        ..files.add(
-          http.MultipartFile.fromBytes(
-            'audio_file',
-            audioFile.readAsBytesSync(),
-            filename: audioFile.path.split('/').last,
-            contentType: MediaType('audio', 'wav'),
-          ),
-        );
-      return request.send();
-    }
-
     try {
-      http.StreamedResponse streamed = await sendRequest(uri);
-      http.Response response = await http.Response.fromStream(streamed);
+      final result = await _transcribeWithElevenLabs(audioFile);
+      final name = (result['speaker'] as String?) ?? 'Unknown';
+      final text = (result['text'] as String?) ?? '';
+      final time = TimeOfDay.now().format(context);
 
-      if (response.statusCode == 307 || response.statusCode == 302) {
-        final location = streamed.headers['location'];
-        if (location != null) {
-          uri = Uri.parse(location);
-          streamed = await sendRequest(uri);
-          response = await http.Response.fromStream(streamed);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Redirect without Location header'),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-          return;
-        }
-      }
-      if (response.statusCode == 204) {
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (mounted) showAccountDeletedDialog();
-        setState(() {
-        });
+      if (text.trim().isEmpty || !_isTextInLanguage(text, _appLanguageCode)) {
         return;
       }
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        final speakers = body['speakers'] as List<dynamic>;
 
-        setState(() {
-          for (var speakerEntry in speakers) {
-            final key = (speakerEntry as Map<String, dynamic>).keys.first;
-            final data = speakerEntry[key] as Map<String, dynamic>;
-            final name = data['name'] as String? ?? 'Unknown';
-            final text = data['spoken_text'] as String? ?? '';
-            final time = TimeOfDay.now().format(context);
-
-            if (text.trim().isEmpty || !_isTextInLanguage(text, _appLanguageCode)) {
-              continue;
-            }
-
-            final isMe = name.trim().toLowerCase() ==
-                _myName.trim().toLowerCase();
-            _messages.add({
-              'user': name,
-              'text': text,
-              'time': time,
-              'isMe': isMe,
-              'spoken': false,
-              'audioLabel': label,
-            });
-            _latestSentence = '$name: $text';
-            _latestSentenceTimer?.cancel();
-            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-              setState(() {
-                _latestSentence = '';
-              });
-            });
-            _speakerIndex++;
-          }
+      final isMe = name.trim().toLowerCase() == _myName.trim().toLowerCase();
+      setState(() {
+        _messages.add({
+          'user': name,
+          'text': text,
+          'time': time,
+          'isMe': isMe,
+          'spoken': false,
+          'audioLabel': label,
         });
+        _latestSentence = '$name: $text';
+        _latestSentenceTimer?.cancel();
+        _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+          setState(() {
+            _latestSentence = '';
+          });
+        });
+        _speakerIndex++;
+      });
 
-        await _saveCurrentMeetingToFirestore();
-        if (_shouldAutoscroll) _scrollToBottom(animate: true);
-      } else {
-        final errorBody = response.body.isNotEmpty
-            ? response.body
-            : 'No error message from API';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('API error ${response.statusCode}: $errorBody'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      await _saveCurrentMeetingToFirestore();
+      if (_shouldAutoscroll) _scrollToBottom(animate: true);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to call API: $e'),
+          content: Text('ElevenLabs API error: $e'),
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+
+  Future<Map<String, dynamic>> _transcribeWithElevenLabs(File audioFile) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse(ApiConstants.elevenLabsSpeechToText),
+    )
+      ..headers['xi-api-key'] = ApiConstants.elevenLabsApiKey
+      ..files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          audioFile.path,
+          contentType: MediaType('audio', 'wav'),
+        ),
+      );
+
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      throw Exception(
+          'Status ${response.statusCode}: ${response.body.isNotEmpty ? response.body : 'unknown error'}');
     }
   }
 
