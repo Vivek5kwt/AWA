@@ -395,6 +395,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   bool _isEnvironmentNoiseText(String t) {
     final text = t.toLowerCase().trim();
 
+    // Treat lines with "sound" repeated as background noise
+    final soundCount = RegExp(r'\bsound\b').allMatches(text).length;
+    if (soundCount >= 2) return true;
+
     // environmental keywords (EN + Hindi)
     const env = [
       'wind', 'blowing', 'gust', 'breeze', 'fan', 'ac', 'air conditioner',
@@ -403,7 +407,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       'storm', 'thunderstorm', 'waves', 'ocean', 'sea', 'water',
       'waterfall', 'river', 'stream', 'running water', 'keyboard', 'typing',
       'footsteps', 'door closing', 'door slam', 'background music', 'music',
-      'applause', 'clapping', 'crowd', 'crowded', 'noise', 'ambient', 'echo',
+      'background sound', 'fan sound', 'running sound', 'sound of fan',
+      'sound of ac', 'sound of air conditioner', 'sound of traffic',
+      'sound of rain', 'applause', 'clapping', 'crowd', 'crowded', 'noise',
+      'ambient', 'echo',
       // Hindi
       'हवा', 'तेज हवा', 'फैन', 'पंखा', 'एसी', 'ए सी', 'शोर', 'आवाज़', 'शोरगुल',
       'बारिश', 'बूंदें', 'तूफान', 'गर्जना', 'लहर', 'लहरें', 'समुद्र', 'पानी',
@@ -415,13 +422,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     const speechy = [
       // English
       'i', 'we', 'you', 'he', 'she', 'they', 'my', 'your', 'our', 'me', 'us',
-      'is', 'are', 'am', 'have', 'do', 'say', 'want', 'need', 'please', 'hello', 'hi', 'name',
+      'is', 'are', 'am', 'have', 'do', 'say', 'want', 'need', 'please', 'hello',
+      'hi', 'name',
       // Hindi
-      'मैं', 'मुझे', 'मेरा', 'आप', 'तुम', 'हम', 'हैं', 'हूँ', 'है', 'कर', 'रहा', 'रही',
-      'चाहता', 'चाहती', 'कहना', 'कह', 'नाम', 'कृपया', 'नमस्ते', 'हैलो'
+      'मैं', 'मुझे', 'मेरा', 'आप', 'तुम', 'हम', 'हैं', 'हूँ', 'है', 'कर', 'रहा',
+      'रही', 'चाहता', 'चाहती', 'कहना', 'कह', 'नाम', 'कृपया', 'नमस्ते', 'हैलो'
     ];
 
-    final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final words =
+        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     final hasEnv = env.any((k) => text.contains(k));
     final hasSpeechy = speechy.any((k) => text.contains(k));
 
