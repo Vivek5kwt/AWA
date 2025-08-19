@@ -253,26 +253,20 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     }
   }
   Future<void> _deleteSpeaker(Speaker s) async {
-    final endpoint = Uri.parse(ApiConstants.deleteSpeaker);
-
+    // Delete voice using ElevenLabs API
+    final endpoint = Uri.parse('${ApiConstants.elevenLabsVoices}/${s.id}');
     try {
-      final response1 = await _postMultipartAndFollow(endpoint, {
-        'name': s.name,
-        'email': _email,
+      final resp = await http.delete(endpoint, headers: {
+        'xi-api-key': ApiConstants.elevenLabsApiKey,
       });
 
-      if (response1.statusCode == 200) {
-        final data = jsonDecode(response1.body) as Map<String, dynamic>;
-        final serverMessage =
-            data['message']?.toString() ?? 'Speaker deleted successfully';
-
+      if (resp.statusCode == 200) {
         setState(() {
           _speakers.removeWhere((element) => element.id == s.id);
         });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(serverMessage),
+            content: const Text('Speaker deleted successfully'),
             backgroundColor: Colors.green.shade600,
             behavior: SnackBarBehavior.floating,
             action: SnackBarAction(
@@ -282,52 +276,20 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
             ),
           ),
         );
-        return;
-      }
-
-      if (response1.statusCode == 422) {
-        final response2 = await _postMultipartAndFollow(endpoint, {
-          'name': s.name,
-          'phone_number': widget.phoneNumber,
-        });
-
-        if (response2.statusCode == 200) {
-          final data = jsonDecode(response2.body) as Map<String, dynamic>;
-          final serverMessage =
-              data['message']?.toString() ?? 'Speaker deleted successfully';
-
-          setState(() {
-            _speakers.removeWhere((element) => element.id == s.id);
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(serverMessage),
-              backgroundColor: Colors.green.shade600,
-              behavior: SnackBarBehavior.floating,
-              action: SnackBarAction(
-                label: 'Dismiss',
-                textColor: Colors.white,
-                onPressed: () {},
-              ),
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Delete failed: ${resp.statusCode}'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: Colors.white,
+              onPressed: () {},
             ),
-          );
-          return;
-        }
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Delete failed: ${response1.statusCode}'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'Dismiss',
-            textColor: Colors.white,
-            onPressed: () {},
           ),
-        ),
-      );
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -512,10 +474,18 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                 backgroundColor: widget.isDarkMode ? Colors.grey[900]! : Colors.white,
                 edgeOffset: 20,
                 child: _speakers.isEmpty
-                    ? _NoSpeakersWidget(
-                        isDarkMode: widget.isDarkMode,
-                        phoneNumber: widget.phoneNumber,
-                        onAdd: _goToAddSpeaker,
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.6,
+                            child: _NoSpeakersWidget(
+                              isDarkMode: widget.isDarkMode,
+                              phoneNumber: widget.phoneNumber,
+                              onAdd: _goToAddSpeaker,
+                            ),
+                          ),
+                        ],
                       )
                     : ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
