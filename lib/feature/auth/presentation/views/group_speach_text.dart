@@ -332,11 +332,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       final data = await _stt(file); // auto detect; no language_code param
       if (data != null) {
         final text = (data['text'] ?? '').toString().trim();
-        if (_isLikelySpeech(text, data)) {
+        if (text.isNotEmpty) {
           final code = _code3ToLang((data['language_code'] ?? '').toString());
           _addTranscriptLine(text, lang: code);
+
+          // Log potential noise without dropping the transcript
+          if (!_isLikelySpeech(text, data)) {
+            debugPrint("Filtered as noise: $text");
+          }
         } else {
-          debugPrint("Filtered as noise: $text");
+          debugPrint("STT returned empty text.");
         }
       } else {
         debugPrint("STT failed for a chunk.");
