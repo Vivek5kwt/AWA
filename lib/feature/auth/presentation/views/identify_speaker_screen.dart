@@ -253,57 +253,21 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     }
   }
   Future<void> _deleteSpeaker(Speaker s) async {
-    // Delete voice using ElevenLabs API
-    final endpoint = Uri.parse('${ApiConstants.elevenLabsVoices}/${s.id}');
-    try {
-      final resp = await http.delete(endpoint, headers: {
-        'xi-api-key': ApiConstants.elevenLabsApiKey,
-      });
-
-      if (resp.statusCode == 200) {
-        setState(() {
-          _speakers.removeWhere((element) => element.id == s.id);
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Speaker deleted successfully'),
-            backgroundColor: Colors.green.shade600,
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'Dismiss',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
-          ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Delete failed: ${resp.statusCode}'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-            action: SnackBarAction(
-              label: 'Dismiss',
-              textColor: Colors.white,
-              onPressed: () {},
-            ),
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-          action: SnackBarAction(
-            label: 'Dismiss',
-            textColor: Colors.white,
-            onPressed: () {},
-          ),
+    setState(() {
+      _speakers.removeWhere((element) => element.id == s.id);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Speaker removed'),
+        backgroundColor: Colors.green.shade600,
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Dismiss',
+          textColor: Colors.white,
+          onPressed: () {},
         ),
-      );
-    }
+      ),
+    );
   }
 
   void _confirmDelete(BuildContext ctx, Speaker s) {
@@ -494,11 +458,13 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                   itemBuilder: (_, i) {
                     final s = _speakers[i];
                     final avatarColors = _avatarGradients[i % _avatarGradients.length];
+                    final double start = (0.05 * i).clamp(0.0, 0.95);
+                    final double end = (start + 0.35).clamp(start, 1.0);
                     final anim = Tween<Offset>(
-                        begin: Offset(0, 0.16 * (i + 1)), end: Offset.zero)
+                            begin: Offset(0, 0.16 * (i + 1)), end: Offset.zero)
                         .animate(CurvedAnimation(
                       parent: _listAnimController,
-                      curve: Interval(0.05 * i, 0.4 + 0.10 * i, curve: Curves.easeOut),
+                      curve: Interval(start, end, curve: Curves.easeOut),
                     ));
                     return SlideTransition(
                       position: anim,
