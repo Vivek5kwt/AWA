@@ -503,9 +503,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     final hasIndic = _hasIndicScript(t);
     final hasArabic = _hasArabicScript(t);
 
-    // Be friendly for non-English scripts
-    if ((hasIndic || hasArabic) && (words.length >= 3 || t.length >= 12)) {
-      if (prob == null || prob >= 0.50) return true;
+    // Be friendly for non-English scripts and allow shorter phrases
+    if (hasIndic || hasArabic) {
+      // Lower probability threshold to reduce false negatives for Indic/Arabic text
+      if (prob == null || prob >= 0.30) {
+        if (words.length >= 2 || t.length >= 8) return true;
+      }
     }
 
     // General accept if probability high enough
