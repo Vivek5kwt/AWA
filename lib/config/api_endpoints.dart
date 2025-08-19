@@ -35,4 +35,9 @@ abstract final class ApiConstants {
      "${_apiBaseUrl}notification_readed";
  static const String getSubPlan = "${_apiBaseUrl}get_subscription_plans";
  static const String getTransaction = "${_apiBaseUrl}get_transactions_by_email";
+
+ // ElevenLabs endpoints
+ static const String elevenLabsApiKey = 'YOUR_ELEVENLABS_API_KEY';
+ static const String _elevenLabsBaseUrl = 'https://api.elevenlabs.io/v1';
+ static const String listElevenLabsVoices = "${_elevenLabsBaseUrl}/voices";
 }

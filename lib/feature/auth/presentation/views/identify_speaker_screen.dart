@@ -184,29 +184,33 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
       _speakers = [];
     });
     try {
-      final uri = Uri.parse('${ApiConstants.listSpeaker}$_email');
-      final resp = await http.get(uri);
+      // Fetch voices from ElevenLabs instead of the legacy list_speakers API
+      final uri = Uri.parse(ApiConstants.listElevenLabsVoices);
+      final resp = await http.get(uri, headers: {
+        'xi-api-key': ApiConstants.elevenLabsApiKey,
+      });
 
-      // ==== FIXED LOGIC ====
-      if (resp.statusCode == 204) {
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (mounted) showAccountDeletedDialog();
-        setState(() {
-          _loading = false;
-        });
-        return;
-      } else if (resp.statusCode == 200) {
+      if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final raw = data['speakers'] as List<dynamic>? ?? [];
+        final raw = data['voices'] as List<dynamic>? ?? [];
         setState(() {
-          _speakers = raw.map((e) => Speaker.fromJson(e as Map<String, dynamic>)).toList();
+          _speakers = raw
+              .map((e) => Speaker(
+                    id: e['voice_id'] as String,
+                    name: e['name'] as String? ?? '',
+                    email: '',
+                    embeddingCount:
+                        (e['samples'] is List) ? (e['samples'] as List).length : 0,
+                  ))
+              .toList();
           _error = null; // no error
         });
         _listAnimController.forward(from: 0);
+      } else if (resp.statusCode == 401) {
+        setState(() => _error = 'Invalid ElevenLabs API key');
       } else {
         setState(() => _error = 'Load failed: ${resp.statusCode}');
       }
-      // =====================
     } catch (e) {
       setState(() => _error = 'Error: $e');
     } finally {
