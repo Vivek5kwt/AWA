@@ -42,4 +42,6 @@ static const String _elevenLabsBaseUrl = 'https://api.elevenlabs.io/v1';
 static const String listElevenLabsVoices = "${_elevenLabsBaseUrl}/voices";
 static const String elevenLabsSpeechToText =
     "${_elevenLabsBaseUrl}/speech-to-text";
+static const String elevenLabsModelId = 'eleven_monolingual_v1';
+static const String elevenLabsLanguage = 'en';
 }
