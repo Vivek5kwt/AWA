@@ -333,12 +333,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       if (data != null) {
         final text = (data['text'] ?? '').toString().trim();
         if (text.isNotEmpty) {
-          final code = _code3ToLang((data['language_code'] ?? '').toString());
-          _addTranscriptLine(text, lang: code);
-
-          // Log potential noise without dropping the transcript
-          if (!_isLikelySpeech(text, data)) {
-            debugPrint("Filtered as noise: $text");
+          // Only add transcripts that look like real speech
+          if (_isLikelySpeech(text, data)) {
+            final code =
+                _code3ToLang((data['language_code'] ?? '').toString());
+            _addTranscriptLine(text, lang: code);
           }
         } else {
           debugPrint("STT returned empty text.");
