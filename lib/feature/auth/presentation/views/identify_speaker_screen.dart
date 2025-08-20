@@ -612,9 +612,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                                     ),
                                     child: Center(
                                       child: Text(
-                                        s.name.isNotEmpty
-                                            ? s.name[0].toUpperCase()
-                                            : '?',
+                                        '${i + 1}',
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold,
@@ -637,23 +635,13 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                                     runSpacing: 6,
                                     children: [
                                       Text(
-                                        'User $i',
+                                        'User ${i + 1}',
                                         style: TextStyle(
                                           color: widget.isDarkMode
                                               ? Colors.cyanAccent
                                               : Colors.deepPurpleAccent,
                                           fontWeight: FontWeight.w600,
                                           fontSize: 16,
-                                        ),
-                                      ),
-                                      Text(
-                                        s.name,
-                                        style: TextStyle(
-                                          color: widget.isDarkMode
-                                              ? Colors.white
-                                              : Colors.black87,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 19,
                                         ),
                                       ),
                                       Container(
