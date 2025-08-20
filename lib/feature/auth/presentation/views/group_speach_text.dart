@@ -67,7 +67,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     )..repeat(reverse: true);
     _speech.initialize();
     _initUser();
-    _initTTS();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
     _loadAppLanguageCode();
@@ -151,6 +150,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     setState(() {
       _appLanguageCode = code ?? Localizations.localeOf(context).languageCode;
     });
+    await _initTTS();
   }
 
   Future<void> _initUser() async {
@@ -164,14 +164,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   Future<void> _initTTS() async {
-    await _flutterTts.setLanguage("en-IN");
+    final ttsLocale = _localeIdForLanguage(_appLanguageCode).replaceAll('_', '-');
+    await _flutterTts.setLanguage(ttsLocale);
     await _flutterTts.setPitch(1.0);
     await _flutterTts.setSpeechRate(0.32);
     await _flutterTts.setVolume(1.0);
-    await _flutterTts.setVoice({
-      'name': 'en-in-x-end-network',
-      'locale': 'en-IN',
-    });
   }
 
   String _capitalize(String s) {
@@ -181,6 +178,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   String _localeIdForLanguage(String code) {
     switch (code) {
+      case 'en':
+        return 'en_IN';
       case 'hi':
         return 'hi_IN';
       case 'pa':
@@ -196,7 +195,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       case 'ur':
         return 'ur_IN';
       default:
-        return 'en_US';
+        return 'en_IN';
     }
   }
 
@@ -212,6 +211,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       onResult: _onSpeechResult,
       listenMode: ListenMode.dictation,
       localeId: localeId,
+      partialResults: true,
       onSoundLevelChange: (level) {
         setState(() {
           _amplitude = level * 1000;
@@ -230,10 +230,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   void _onSpeechResult(SpeechRecognitionResult result) async {
     final text = result.recognizedWords.trim();
-    if (text.isEmpty || !result.finalResult) return;
-    if (!_showTextMyLanguage && !_isTextInLanguage(text, _appLanguageCode)) {
-      return;
-    }
+    if (text.isEmpty) return;
+
+    setState(() {
+      _latestSentence = text;
+    });
+
+    if (!result.finalResult) return;
+
     setState(() {
       _messages.add({
         'user': _myName,
@@ -242,7 +246,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         'isMe': true,
         'spoken': false,
       });
-      _latestSentence = text;
     });
     _latestSentenceTimer?.cancel();
     _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
@@ -258,25 +261,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     if (_isRecording) {
       _startListening();
     }
-  }
-
-  // Allow English and major Indian scripts so that Hindi or other
-  // Indian languages are not filtered out when app language is English.
-  bool _isTextInLanguage(String text, String languageCode) {
-    if (languageCode == 'en') {
-      final englishLetters =
-          text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
-      final hasIndianChars = RegExp(
-        r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF'
-        r'\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF'
-        r'\u0D00-\u0D7F\u0D80-\u0DFF]'
-      ).hasMatch(text);
-      if (englishLetters.length > text.length * 0.6 || hasIndianChars) {
-        return true;
-      }
-      return false;
-    }
-    return true;
   }
 
   void _scrollToBottom({bool animate = true}) {
