@@ -232,8 +232,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     setState(() {
       _isRecording = true;
     });
-    final localeId =
-        _showTextMyLanguage ? _localeIdForLanguage(_appLanguageCode) : null;
+    // Always listen in the user's selected app language to support
+    // multilingual speech recognition.
+    final localeId = _localeIdForLanguage(_appLanguageCode);
     _speech.listen(
       onResult: _onSpeechResult,
       listenMode: ListenMode.dictation,
