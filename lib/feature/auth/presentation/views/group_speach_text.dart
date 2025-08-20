@@ -199,6 +199,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     }
   }
 
+  int get _usersInMeetingCount {
+    final users = <String>{_myName};
+    for (var m in _messages) {
+      final user = m['user'];
+      if (user is String) users.add(user);
+    }
+    return users.length;
+  }
+
   Future<void> _startListening() async {
     final available = await _speech.initialize();
     if (!available) return;
@@ -532,6 +541,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
               Column(
                 children: [
                   const SizedBox(height: 20),
+                  Text(
+                    'Users in meeting: $_usersInMeetingCount',
+                    style: TextStyle(
+                      color: widget.isDarkMode
+                          ? Colors.cyanAccent
+                          : Colors.deepPurpleAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

@@ -516,33 +516,16 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                     : ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(top: 12, left: 18, right: 18, bottom: 40),
-                  itemCount: _speakers.length + 1,
+                  itemCount: _speakers.length,
                   itemBuilder: (_, i) {
-                    if (i == 0) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Center(
-                          child: Text(
-                            'Users in meeting: ${_speakers.length}',
-                            style: TextStyle(
-                              color: widget.isDarkMode
-                                  ? Colors.cyanAccent
-                                  : Colors.deepPurpleAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ),
-                      );
-                    }
-                    final s = _speakers[i - 1];
+                    final s = _speakers[i];
                     final avatarColors =
-                        _avatarGradients[(i - 1) % _avatarGradients.length];
+                        _avatarGradients[i % _avatarGradients.length];
                     final anim = Tween<Offset>(
-                            begin: Offset(0, 0.16 * i), end: Offset.zero)
+                            begin: Offset(0, 0.16 * (i + 1)), end: Offset.zero)
                         .animate(CurvedAnimation(
                       parent: _listAnimController,
-                      curve: Interval(0.05 * i, 0.4 + 0.10 * i, curve: Curves.easeOut),
+                      curve: Interval(0.05 * (i + 1), 0.4 + 0.10 * (i + 1), curve: Curves.easeOut),
                     ));
                     return SlideTransition(
                       position: anim,
