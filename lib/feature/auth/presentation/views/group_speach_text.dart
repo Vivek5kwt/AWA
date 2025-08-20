@@ -282,7 +282,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
       setState(() => _latestSentence = '');
     });
-    await _saveCurrentMeetingToFirestore();
+    unawaited(_saveCurrentMeetingToFirestore());
     if (_speakOnMeeting) {
       await _speakMyLastMessage(text);
     }
@@ -327,9 +327,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         });
       });
     });
-
-    await _saveCurrentMeetingToFirestore();
-    await Future.delayed(const Duration(milliseconds: 120));
+    unawaited(_saveCurrentMeetingToFirestore());
     if (_speakOnMeeting) {
       await _speakMyLastMessage(msg);
     }
