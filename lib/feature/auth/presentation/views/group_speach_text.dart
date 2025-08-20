@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -65,7 +66,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
-    _speech.initialize();
+    _speech.initialize(onStatus: _onSpeechStatus, onError: _onSpeechError);
     _initUser();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
@@ -208,9 +209,26 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     return users.length;
   }
 
+  void _onSpeechStatus(String status) {
+    if (status == 'notListening' && _isRecording) {
+      _startListening();
+    }
+  }
+
+  void _onSpeechError(SpeechRecognitionError error) {
+    if (_isRecording) {
+      _startListening();
+    }
+  }
+
   Future<void> _startListening() async {
-    final available = await _speech.initialize();
-    if (!available) return;
+    if (!_speech.isAvailable) {
+      final available = await _speech.initialize(
+        onStatus: _onSpeechStatus,
+        onError: _onSpeechError,
+      );
+      if (!available) return;
+    }
     setState(() {
       _isRecording = true;
     });
@@ -221,6 +239,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       listenMode: ListenMode.dictation,
       localeId: localeId,
       partialResults: true,
+      listenFor: const Duration(hours: 1),
+      pauseFor: const Duration(seconds: 5),
+      cancelOnError: false,
       onSoundLevelChange: (level) {
         setState(() {
           _amplitude = level * 1000;
