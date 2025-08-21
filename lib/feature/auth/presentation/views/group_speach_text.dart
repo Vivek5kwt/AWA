@@ -213,8 +213,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   void _onSpeechStatus(String status) {
-    if (status == 'notListening' && _isRecording) {
-      _startListening();
+    if (_isRecording && (status == 'notListening' || status == 'done')) {
+      // Some platforms send a "done" status or stop listening after a
+      // period of inactivity. Restart the listener so the microphone stays
+      // active even after long pauses in speech.
+      Future.delayed(const Duration(milliseconds: 200), _startListening);
     }
   }
 
@@ -244,7 +247,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       localeId: localeId,
       partialResults: true,
       listenFor: const Duration(hours: 1),
-      pauseFor: const Duration(seconds: 5),
+      // Allow a longer pause before the recognizer stops so users can
+      // take breaks without losing the active session.
+      pauseFor: const Duration(minutes: 1),
       cancelOnError: false,
       onSoundLevelChange: (level) {
         setState(() {
