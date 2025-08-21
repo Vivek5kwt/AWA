@@ -253,7 +253,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     // recorder may block the speech API from receiving audio and no text will
     // be produced.
     final localeId = _localeIdForLanguage(_appLanguageCode);
-    final didListen = await _speech.listen(
+    await _speech.listen(
       onResult: _onSpeechResult,
       listenMode: ListenMode.dictation,
       localeId: localeId,
@@ -269,7 +269,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         });
       },
     );
-    if (!didListen) return;
+    if (!_speech.isListening) return;
 
     // If speech recognition started successfully, begin recording the raw audio
     // in parallel for speaker identification. Starting the recorder after the
