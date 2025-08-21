@@ -247,25 +247,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       );
       if (!available) return;
     }
-    if (!await _audioRecorder.hasPermission()) return;
-    final dir = await getTemporaryDirectory();
-    _currentRecordingPath =
-        '${dir.path}/segment_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    await _audioRecorder.start(
-      const rec.RecordConfig(
-        encoder: rec.AudioEncoder.aacLc,
-        bitRate: 128000,
-        sampleRate: 44100,
-      ),
-      path: _currentRecordingPath,
-    );
-    setState(() {
-      _isRecording = true;
-    });
     // Always listen in the user's selected app language to support
-    // multilingual speech recognition.
+    // multilingual speech recognition. Start the speech recognizer first so
+    // that it can claim the microphone before the recorder does; otherwise the
+    // recorder may block the speech API from receiving audio and no text will
+    // be produced.
     final localeId = _localeIdForLanguage(_appLanguageCode);
-    _speech.listen(
+    final didListen = await _speech.listen(
       onResult: _onSpeechResult,
       listenMode: ListenMode.dictation,
       localeId: localeId,
@@ -281,6 +269,27 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         });
       },
     );
+    if (!didListen) return;
+
+    // If speech recognition started successfully, begin recording the raw audio
+    // in parallel for speaker identification. Starting the recorder after the
+    // listener ensures the speech API continues to function.
+    if (await _audioRecorder.hasPermission()) {
+      final dir = await getTemporaryDirectory();
+      _currentRecordingPath =
+          '${dir.path}/segment_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _audioRecorder.start(
+        const rec.RecordConfig(
+          encoder: rec.AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: _currentRecordingPath,
+      );
+    }
+    setState(() {
+      _isRecording = true;
+    });
   }
 
   Future<void> _stopListening() async {
