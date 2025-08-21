@@ -170,6 +170,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     await _flutterTts.setPitch(1.0);
     await _flutterTts.setSpeechRate(0.32);
     await _flutterTts.setVolume(1.0);
+    // Ensure speak() completes only after the utterance is finished so we can
+    // safely resume listening afterward.
+    await _flutterTts.awaitSpeakCompletion(true);
   }
 
   String _capitalize(String s) {
@@ -285,13 +288,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     unawaited(_saveCurrentMeetingToFirestore());
     if (_speakOnMeeting) {
       await _speakMyLastMessage(text);
-    }
-    if (_shouldAutoscroll) _scrollToBottom(animate: true);
-
-    // Restart listening to keep capturing subsequent speech input.
-    if (_isRecording) {
+    } else if (_isRecording) {
+      // If text-to-speech is disabled we still want to continue
+      // listening for further user input.
       _startListening();
     }
+    if (_shouldAutoscroll) _scrollToBottom(animate: true);
   }
 
   void _scrollToBottom({bool animate = true}) {
@@ -337,10 +339,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   Future<void> _speakMyLastMessage(String msg) async {
     int lastIndex = _messages.lastIndexWhere(
-            (m) => m['isMe'] == true && m['text'] == msg && m['spoken'] == false);
+        (m) => m['isMe'] == true && m['text'] == msg && m['spoken'] == false);
     if (lastIndex == -1) return;
-    await _flutterTts.speak(msg);
-
+    await _speakText(msg);
     setState(() {
       _messages[lastIndex]['spoken'] = true;
     });
@@ -349,10 +350,23 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   Future<void> _replaySpeak(int index) async {
     final msg = _messages[index]['text'] ?? '';
     if (msg.isNotEmpty) {
-      await _flutterTts.speak(msg);
+      await _speakText(msg);
       setState(() {
         _messages[index]['spoken'] = true;
       });
+    }
+  }
+
+  Future<void> _speakText(String msg) async {
+    final wasRecording = _isRecording;
+    if (wasRecording) {
+      // Stop listening to avoid capturing the TTS output.
+      await _speech.stop();
+    }
+    await _flutterTts.speak(msg);
+    if (wasRecording) {
+      // Resume listening once speaking is finished.
+      _startListening();
     }
   }
 
