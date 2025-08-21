@@ -1,17 +1,25 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
+
 import 'package:awa/config/local_extension.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_recognition_error.dart';
-import 'package:wave_blob/wave_blob.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart' as rec;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:wave_blob/wave_blob.dart';
 
 import '../../../../core/utils/routing/routes.dart';
+import '../../../../core/network/http_service.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -38,6 +46,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   final TextEditingController _textController = TextEditingController();
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
+
+  final rec.AudioRecorder _audioRecorder = rec.AudioRecorder();
+  String? _currentRecordingPath;
 
   final FlutterTts _flutterTts = FlutterTts();
 
@@ -121,6 +132,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _textController.dispose();
     _flutterTts.stop();
     _scrollController.dispose();
+    _audioRecorder.dispose();
     super.dispose();
   }
 
@@ -235,6 +247,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       );
       if (!available) return;
     }
+    if (!await _audioRecorder.hasPermission()) return;
+    final dir = await getTemporaryDirectory();
+    _currentRecordingPath =
+        '${dir.path}/segment_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _audioRecorder.start(
+      const rec.RecordConfig(
+        encoder: rec.AudioEncoder.aacLc,
+        bitRate: 128000,
+        sampleRate: 44100,
+      ),
+      path: _currentRecordingPath,
+    );
     setState(() {
       _isRecording = true;
     });
@@ -261,6 +285,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   Future<void> _stopListening() async {
     await _speech.stop();
+    if (await _audioRecorder.isRecording()) {
+      await _audioRecorder.stop();
+    }
     setState(() {
       _isRecording = false;
       _amplitude = 0;
@@ -276,16 +303,23 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     });
 
     if (!result.finalResult) return;
-
+    await _audioRecorder.stop();
+    final path = _currentRecordingPath;
+    String speaker = _myName;
+    if (path != null && File(path).existsSync()) {
+      speaker = await _identifySpeaker(path);
+    }
+    final isMe = speaker.toLowerCase() == _myName.toLowerCase();
     setState(() {
       _messages.add({
-        'user': _myName,
+        'user': speaker,
         'text': text,
         'time': TimeOfDay.now().format(context),
-        'isMe': true,
+        'isMe': isMe,
         'spoken': false,
       });
     });
+    _currentRecordingPath = null;
     _latestSentenceTimer?.cancel();
     _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
       setState(() => _latestSentence = '');
@@ -367,12 +401,37 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     if (wasRecording) {
       // Stop listening to avoid capturing the TTS output.
       await _speech.stop();
+      if (await _audioRecorder.isRecording()) {
+        await _audioRecorder.stop();
+      }
     }
     await _flutterTts.speak(msg);
     if (wasRecording) {
       // Resume listening once speaking is finished.
       _startListening();
     }
+  }
+
+  Future<String> _identifySpeaker(String filePath) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email') ?? '';
+      final uri = Uri.parse(ApiConstants.identifySpeaker);
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['email'] = email
+        ..files.add(await http.MultipartFile.fromPath(
+          'audio_file',
+          filePath,
+          contentType: MediaType('audio', 'm4a'),
+        ));
+      final resp = await req.send();
+      final body = await resp.stream.bytesToString();
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        return (data['speaker'] as String?)?.toString() ?? _myName;
+      }
+    } catch (_) {}
+    return _myName;
   }
 
   Future<void> _saveCurrentMeetingToFirestore() async {
