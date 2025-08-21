@@ -305,7 +305,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     if (!result.finalResult) return;
     await _audioRecorder.stop();
     final path = _currentRecordingPath;
-    String speaker = _myName;
+    String speaker = 'Anonymous';
     if (path != null && File(path).existsSync()) {
       speaker = await _identifySpeaker(path);
     }
@@ -428,10 +428,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       final body = await resp.stream.bytesToString();
       if (resp.statusCode == 200) {
         final data = jsonDecode(body) as Map<String, dynamic>;
-        return (data['speaker'] as String?)?.toString() ?? _myName;
+        return (data['speaker'] as String?)?.toString() ?? 'Anonymous';
       }
     } catch (_) {}
-    return _myName;
+    return 'Anonymous';
   }
 
   Future<void> _saveCurrentMeetingToFirestore() async {
