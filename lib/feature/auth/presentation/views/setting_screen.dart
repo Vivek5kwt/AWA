@@ -5,16 +5,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isDarkMode;
-
   const SettingsScreen({
     Key? key,
     this.isDarkMode = false,
   }) : super(key: key);
-
   @override
   _SettingsScreenState createState() => _SettingsScreenState();
 }
-
 class _SettingsScreenState extends State<SettingsScreen> {
   late bool _isDarkMode;
   bool _notificationsEnabled = true;
@@ -162,6 +159,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     : Colors.white.withOpacity(0.84),
                 child: SwitchListTile(
                   title: Text(
+                    //15-0(2 ov)
                     context.loc.notifications,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
