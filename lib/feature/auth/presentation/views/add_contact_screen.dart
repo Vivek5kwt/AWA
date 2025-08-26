@@ -6,12 +6,10 @@ import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as rec;
-import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/network/http_service.dart';
+import '../../../../core/speaker/speaker_service.dart';
 
 class AddContactScreen extends StatefulWidget {
   final String name;
@@ -54,7 +52,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   late final AnimationController _checkBurst;
   late final Animation<double> _burstScale;
   List<bool> _wordVisible = [];
-  String _email = '';
+  final SpeakerService _speakerService = SpeakerService();
   bool _userStartedSpeaking = false;
   DateTime? _lastVoiceTime;
   bool _dialogActive = false;
@@ -71,7 +69,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.name);
-    _loadStoredEmail();
+    _speakerService.init();
     _loadTutorialFlags();
 
     _micPulse = AnimationController(
@@ -94,14 +92,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _revealWords();
-  }
-
-  Future<void> _loadStoredEmail() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _email = prefs.getString('email') ?? '';
-    });
   }
 
   Future<void> _loadTutorialFlags() async {
@@ -141,6 +131,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     _ampTimer?.cancel();
     _maxRecordTimer?.cancel();
     _recorder.dispose();
+    _speakerService.dispose();
     _micPulse.dispose();
     _checkBurst.dispose();
     _nameController?.dispose();
@@ -164,14 +155,15 @@ class _AddContactScreenState extends State<AddContactScreen>
     }
 
     final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/sentence_${_currentIndex + 1}.m4a';
+    final filePath = '${dir.path}/sentence_${_currentIndex + 1}.wav';
     _currentRecordingPath = filePath;
 
     await _recorder.start(
       const rec.RecordConfig(
-        encoder: rec.AudioEncoder.aacLc,
+        encoder: rec.AudioEncoder.wav,
+        sampleRate: 16000,
+        numChannels: 1,
         bitRate: 128000,
-        sampleRate: 44100,
       ),
       path: filePath,
     );
@@ -445,7 +437,7 @@ class _AddContactScreenState extends State<AddContactScreen>
         return;
       }
       setState(() => _isUploading = true);
-      await _registerSpeakerAPI(_currentRecordingPath!);
+      await _registerSpeakerLocal(_currentRecordingPath!);
       if (!mounted) return;
       setState(() => _isUploading = false);
     } else {
@@ -454,54 +446,35 @@ class _AddContactScreenState extends State<AddContactScreen>
     }
   }
 
-  Future<void> _registerSpeakerAPI(String filePath) async {
+  Future<void> _registerSpeakerLocal(String filePath) async {
     try {
-      final uri = Uri.parse(
-        ApiConstants.registerSpeaker.endsWith('/')
-            ? ApiConstants.registerSpeaker
-            : '${ApiConstants.registerSpeaker}/',
-      );
-      final req = http.MultipartRequest('POST', uri)
-        ..fields['name'] = _nameController!.text
-        ..fields['sentence_no'] = (_currentIndex + 1).toString()
-        ..fields['email'] = _email
-        ..files.add(await http.MultipartFile.fromPath(
-          'audio_file',
-          filePath,
-          contentType: MediaType('audio', 'm4a'),
-        ));
-      final resp = await req.send();
-      await resp.stream.toBytes();
+      await _speakerService.enrollAppend(_nameController!.text, filePath);
       if (!mounted) return;
-      if (resp.statusCode == 200) {
-        setState(() => _showSuccess = true);
-        _checkBurst.forward(from: 0);
-        await Future.delayed(const Duration(milliseconds: 1200));
-        if (!mounted) return;
-        if (_currentIndex < _sentences.length - 1) {
-          setState(() {
-            _currentIndex++;
-            _showSuccess = false;
-            _progress = 0.0;
-            _userStartedSpeaking = false;
-          });
-          _revealWords();
-        } else {
-          _showSnackbar(
-            "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
-            Colors.greenAccent,
-          );
-          await Future.delayed(const Duration(milliseconds: 800));
-          if (!mounted) return;
-          context.pop(true);
-        }
+      setState(() => _showSuccess = true);
+      _checkBurst.forward(from: 0);
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (!mounted) return;
+      if (_currentIndex < _sentences.length - 1) {
+        setState(() {
+          _currentIndex++;
+          _showSuccess = false;
+          _progress = 0.0;
+          _userStartedSpeaking = false;
+        });
+        _revealWords();
       } else {
-        setState(() => _showTryAgain = true);
+        _showSnackbar(
+          "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
+          Colors.greenAccent,
+        );
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (!mounted) return;
+        context.pop(true);
       }
     } catch (_) {
       if (!mounted) return;
       setState(() => _showTryAgain = true);
-      _showSnackbar("Network error. Please try again.", Colors.redAccent);
+      _showSnackbar("Error saving sample. Please try again.", Colors.redAccent);
     }
   }
 
