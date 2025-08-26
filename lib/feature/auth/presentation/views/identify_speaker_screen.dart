@@ -726,7 +726,6 @@ class _Candidate {
 
       return _Candidate(id: id, score: score);
     }
-255598
     if (e is List && e.length >= 2) {
       final id = e[0].toString();
       final numOrStr = e[1];
