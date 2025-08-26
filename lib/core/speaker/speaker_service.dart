@@ -3,47 +3,79 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// Use ONNX if present; otherwise fallback heuristic.
 import 'package:sherpa_onnx/sherpa_onnx.dart';
 
-/// Offline speaker enrollment + identification with real embeddings
-/// from sherpa_onnx SpeakerEmbeddingExtractor.
-/// - Stores multiple samples per user and matches against the per-user average.
-/// - Uses cosine similarity with a second-best margin to avoid false positives.
-class SpeakerService {
-  static const _storageKey = 'speaker_embeddings_v3';
+/// Simple WAV container for our parser (16-bit PCM).
+class _Wav {
+  _Wav(this.samples, this.sampleRate, this.numChannels);
+  final Int16List samples; // interleaved if numChannels > 1
+  final int sampleRate;
+  final int numChannels;
+  int get length => samples.length;
+}
 
-  SpeakerEmbeddingExtractor? _extractor;
-  String? _modelLocalPath;
+/// Offline speaker enrollment + identification with automatic fallback.
+/// - ONNX model (if bundled) -> high accuracy embeddings
+/// - Otherwise robust heuristic (RMS/ZCR + bands + VAD)
+/// Stores multiple samples per user; matches with cosine + margin.
+class SpeakerService {
+  static const _assetModelPath = 'assets/models/speaker_embedding.onnx';
+
+  SpeakerEmbeddingExtractor? _extractor; // non-null when ONNX model is available
+  String? _modelLocalPath;               // copied model path in app storage
+
+  late String _storeKey;                 // per-mode bucket
 
   bool get isReady => _extractor != null;
+  bool get isFallback => _extractor == null;
 
-  /// Initialize sherpa-onnx and load the ONNX embedding model from assets.
-  /// Make sure you include the file in pubspec:
-  ///   assets:
-  ///     - assets/models/speaker_embedding.onnx
+  /// Initialize backend + decide per-mode storage key.
   Future<void> init() async {
-    if (_extractor != null) return;
+    try {
+      initBindings();
+    } catch (_) {}
 
-    // Initialize native bindings.
-    initBindings(); // required before readWave()/extractor usage. :contentReference[oaicite:0]{index=0}
+    // Helpful diagnostics so asset issues are obvious
+    try {
+      final manifest = await rootBundle.loadString('AssetManifest.json');
+      if (!manifest.contains(_assetModelPath)) {
+        debugPrint('[SpeakerService] Asset NOT in bundle: $_assetModelPath');
+      } else {
+        debugPrint('[SpeakerService] Asset found in bundle: $_assetModelPath');
+      }
+    } catch (_) {}
 
-    // Copy the ONNX model from assets to an accessible file path.
-    _modelLocalPath = await _ensureModelIsReady();
+    _modelLocalPath = await _copyModelIfAny();
+    if (_modelLocalPath != null) {
+      try {
+        final cfg = SpeakerEmbeddingExtractorConfig(
+          model: _modelLocalPath!,
+          numThreads: 2,
+          debug: false,
+          provider: 'cpu',
+        );
+        _extractor = SpeakerEmbeddingExtractor(config: cfg);
+        debugPrint('[SpeakerService] ONNX model loaded: $_modelLocalPath');
+      } catch (e) {
+        _extractor = null;
+        debugPrint('[SpeakerService] Failed to init ONNX model, falling back: $e');
+      }
+    } else {
+      debugPrint('[SpeakerService] No ONNX model in assets; using fallback heuristic.');
+    }
 
-    final cfg = SpeakerEmbeddingExtractorConfig(
-      model: _modelLocalPath!,
-      numThreads: 2,
-      debug: false,
-      provider: 'cpu',
-    );
-    _extractor = SpeakerEmbeddingExtractor(config: cfg); // :contentReference[oaicite:1]{index=1}
+    // Separate the stores so ONNX and fallback samples never mix
+    _storeKey = _extractor != null
+        ? 'speaker_embeddings_v3_onnx'
+        : 'speaker_embeddings_v3_fallback';
   }
 
-  /// Free extractor resources (call from your widget's dispose()).
   Future<void> dispose() async {
     try {
       _extractor?.free();
@@ -51,9 +83,8 @@ class SpeakerService {
     _extractor = null;
   }
 
-  // ---------- Public API ----------
+  // ---------------- Public API ----------------
 
-  /// Append one recording sample to [name]. Creates the entry if absent.
   Future<String> enrollAppend(String name, String audioPath) async {
     final n = name.trim();
     if (n.isEmpty) {
@@ -72,11 +103,10 @@ class SpeakerService {
     updated.add(emb);
     data[n] = updated;
 
-    await prefs.setString(_storageKey, jsonEncode(data));
+    await prefs.setString(_storeKey, jsonEncode(data));
     return n;
   }
 
-  /// One-shot enroll to a unique name (kept for compatibility).
   Future<String> enrollName(String name, String audioPath) async {
     final prefs = await SharedPreferences.getInstance();
     final data = _loadEmbeddings(prefs);
@@ -93,43 +123,71 @@ class SpeakerService {
 
     final emb = await _extractEmbeddingFromFile(audioPath);
     data[finalName] = <List<double>>[emb];
-    await prefs.setString(_storageKey, jsonEncode(data));
+    await prefs.setString(_storeKey, jsonEncode(data));
     return finalName;
   }
 
-  /// Identify best match; returns user name or null if not confident.
+  /// Identify best match. Returns name or null if not confident.
   Future<String?> identify(
       String audioPath, {
-        double threshold = 0.80,
-        double secondBestMargin = 0.04,
+        double threshold = 0.74,       // relaxed a bit for ONNX after trimming
+        double secondBestMargin = 0.035,
       }) async {
     final prefs = await SharedPreferences.getInstance();
-    final data = _loadEmbeddings(prefs);
-    if (data.isEmpty) return null;
+    var data = _loadEmbeddings(prefs);
+    if (data.isEmpty) {
+      debugPrint('[SpeakerService] No enrollments in current mode ($_storeKey).');
+      return null;
+    }
+
+    // Slightly relax if in fallback mode
+    final localThreshold = isFallback ? max(0.70, threshold - 0.04) : threshold;
+    final localMargin = isFallback ? max(0.03, secondBestMargin - 0.01) : secondBestMargin;
 
     final probe = await _extractEmbeddingFromFile(audioPath);
+    final probeDim = probe.length;
+
+    // Only compare against embeddings of same dimension
+    data = _filterByDim(data, probeDim);
+    if (data.isEmpty) {
+      debugPrint(
+          '[SpeakerService] Enrollment embeddings do not match dimension $probeDim. Re-enroll in this mode.');
+      return null;
+    }
 
     String? bestId;
-    double best = -1.0, secondBest = -1.0;
+    double bestScore = -1.0, secondBest = -1.0;
 
-    data.forEach((name, listDynamic) {
-      final list = (listDynamic as List)
+    for (final entry in data.entries) {
+      final name = entry.key;
+      final list = (entry.value as List)
           .map<List<double>>((e) => List<double>.from(e as List))
           .toList();
-      if (list.isEmpty) return;
+      if (list.isEmpty) continue;
 
-      final avg = _meanVector(list);
-      final s = _cosine(avg, probe);
-      if (s > best) {
-        secondBest = best;
-        best = s;
-        bestId = name;
-      } else if (s > secondBest) {
-        secondBest = s;
+      final centroid = _meanVector(list);
+      final centroidScore = _cosine(centroid, probe);
+
+      double bestSample = -1.0;
+      for (final s in list) {
+        final sc = _cosine(s, probe);
+        if (sc > bestSample) bestSample = sc;
       }
-    });
 
-    if (best >= threshold && (best - secondBest) >= secondBestMargin) {
+      final score = 0.6 * centroidScore + 0.4 * bestSample;
+
+      if (score > bestScore) {
+        secondBest = bestScore;
+        bestScore = score;
+        bestId = name;
+      } else if (score > secondBest) {
+        secondBest = score;
+      }
+    }
+
+    debugPrint('[Identify] best=$bestScore second=$secondBest (thr=$localThreshold, margin=$localMargin)');
+
+    if (bestScore >= localThreshold && (bestScore - secondBest) >= localMargin) {
       return bestId;
     }
     return null;
@@ -157,13 +215,13 @@ class SpeakerService {
 
   Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_storageKey);
+    await prefs.remove(_storeKey);
   }
 
-  // ---------- Internals ----------
+  // ---------------- Internals ----------------
 
   Map<String, dynamic> _loadEmbeddings(SharedPreferences prefs) {
-    final jsonStr = prefs.getString(_storageKey);
+    final jsonStr = prefs.getString(_storeKey);
     if (jsonStr == null || jsonStr.isEmpty) return {};
     final raw = jsonDecode(jsonStr);
 
@@ -183,60 +241,320 @@ class SpeakerService {
     return out;
   }
 
-  Future<String> _ensureModelIsReady() async {
-    // Support one expected asset path. Change if you prefer a different name.
-    const assetPath = 'assets/models/speaker_embedding.onnx';
-
-    final bytes = await rootBundle.load(assetPath).catchError((_) {
-      throw StateError(
-        'Model not found in assets: $assetPath\n'
-            'Add it to pubspec.yaml and include the file.',
-      );
+  Map<String, dynamic> _filterByDim(Map<String, dynamic> data, int dim) {
+    final out = <String, dynamic>{};
+    data.forEach((name, listDynamic) {
+      final list = (listDynamic as List)
+          .map<List<double>>((e) => List<double>.from(e as List))
+          .where((e) => e.length == dim)
+          .toList();
+      if (list.isNotEmpty) out[name] = list;
     });
-
-    final dir = await getApplicationSupportDirectory();
-    final dst = File('${dir.path}/speaker_embedding.onnx');
-    if (!await dst.exists() || (await dst.length()) != bytes.lengthInBytes) {
-      await dst.create(recursive: true);
-      await dst.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
-    }
-    return dst.path;
+    return out;
   }
 
-  /// Extract a normalized speaker embedding from a WAV file using
-  /// SpeakerEmbeddingExtractor. We read the wave, push to an OnlineStream,
-  /// mark input finished, wait until ready, then compute. :contentReference[oaicite:2]{index=2}
-  Future<List<double>> _extractEmbeddingFromFile(String wavPath) async {
-    final ext = _extractor;
-    if (ext == null) {
-      throw StateError('SpeakerService not initialized');
-    }
-
-    final wave = readWave(wavPath); // -> WaveData {samples, sampleRate} :contentReference[oaicite:3]{index=3}
-    if (wave.sampleRate <= 0 || wave.samples.isEmpty) {
-      throw StateError('Invalid/empty WAV: $wavPath');
-    }
-
-    final stream = ext.createStream(); // :contentReference[oaicite:4]{index=4}
+  Future<String?> _copyModelIfAny() async {
     try {
-      // Feed all samples and finalize input
-      stream.acceptWaveform(samples: wave.samples, sampleRate: wave.sampleRate); // :contentReference[oaicite:5]{index=5}
-      stream.inputFinished(); // :contentReference[oaicite:6]{index=6}
-
-      // Wait until extractor is ready, then compute embedding
-      while (!ext.isReady(stream)) {
-        await Future.delayed(const Duration(milliseconds: 2));
+      final bytes = await rootBundle.load(_assetModelPath);
+      final dir = await getApplicationSupportDirectory();
+      final dst = File('${dir.path}/speaker_embedding.onnx');
+      if (!await dst.exists() || (await dst.length()) != bytes.lengthInBytes) {
+        await dst.create(recursive: true);
+        await dst.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
       }
-      final emb = ext.compute(stream); // Float32List embedding :contentReference[oaicite:7]{index=7}
-      return _l2norm(List<double>.from(emb));
-    } finally {
-      try {
-        stream.free();
-      } catch (_) {}
+      return dst.path;
+    } catch (e) {
+      debugPrint('[SpeakerService] rootBundle.load failed for $_assetModelPath: $e');
+      return null;
     }
   }
 
-  // ---------- Vector math ----------
+  // -------- Embedding extraction (with quality gate) --------
+
+  Future<List<double>> _extractEmbeddingFromFile(String wavPath) async {
+    final wav = await _parseWav(wavPath);
+    if (wav == null || wav.length < wav.sampleRate ~/ 2) {
+      throw StateError('Recording too short or invalid.');
+    }
+
+    // Downmix to mono (if device ignored mono request)
+    final mono = _downmixToMono(wav.samples, wav.numChannels);
+
+    // Trim silence + normalize; also enforce min speech duration
+    final trimmed = _trimSilenceAndNormalize(mono, wav.sampleRate);
+    final speechSec = trimmed.length / wav.sampleRate;
+    if (speechSec < 1.2) {
+      throw StateError('Please speak clearly for at least 1.2 seconds.');
+    }
+
+    if (_extractor != null) {
+      final f32 = Float32List.fromList(trimmed);
+      final stream = _extractor!.createStream();
+      try {
+        stream.acceptWaveform(samples: f32, sampleRate: wav.sampleRate);
+        stream.inputFinished();
+        while (!_extractor!.isReady(stream)) {
+          await Future.delayed(const Duration(milliseconds: 2));
+        }
+        final emb = _extractor!.compute(stream); // Float32List
+        return _l2norm(List<double>.from(emb));
+      } finally {
+        try { stream.free(); } catch (_) {}
+      }
+    } else {
+      final wav2 = _Wav(Int16List.fromList(
+        trimmed.map((v) => (v * 32768.0).clamp(-32768.0, 32767.0).toInt()).toList(),
+      ), wav.sampleRate, 1);
+      return _extractEmbeddingHeuristicFromWav(wav2);
+    }
+  }
+
+  // ---------------- WAV parsing ----------------
+
+  Future<_Wav?> _parseWav(String path) async {
+    final bytes = await File(path).readAsBytes();
+    if (bytes.length < 44) return null;
+
+    String _s(int o, int n) => String.fromCharCodes(bytes.sublist(o, o + n));
+    if (_s(0, 4) != 'RIFF' || _s(8, 4) != 'WAVE') return null;
+
+    final bd = ByteData.sublistView(bytes);
+    int? sampleRate;
+    int? bitsPerSample;
+    int? dataOffset;
+    int? dataSize;
+    int? numChannels;
+
+    int offset = 12;
+    while (offset + 8 <= bytes.length) {
+      final id = _s(offset, 4);
+      final size = bd.getUint32(offset + 4, Endian.little);
+      final next = offset + 8 + size + (size.isOdd ? 1 : 0);
+      if (id == 'fmt ') {
+        final audioFormat = bd.getUint16(offset + 8, Endian.little);
+        numChannels = bd.getUint16(offset + 10, Endian.little);
+        sampleRate = bd.getUint32(offset + 12, Endian.little);
+        bitsPerSample = bd.getUint16(offset + 22, Endian.little);
+        if (audioFormat != 1 || bitsPerSample != 16 || (numChannels ?? 0) < 1) {
+          return null; // expect PCM 16-bit mono/stereo
+        }
+      } else if (id == 'data') {
+        dataOffset = offset + 8;
+        dataSize = size;
+        break;
+      }
+      offset = next;
+    }
+
+    if (sampleRate == null || bitsPerSample != 16 || dataOffset == null || dataSize == null) {
+      return null;
+    }
+    if (dataOffset + dataSize > bytes.length) {
+      return null;
+    }
+
+    final samples = Int16List.view(
+      bytes.buffer,
+      bytes.offsetInBytes + dataOffset,
+      dataSize ~/ 2,
+    );
+    return _Wav(samples, sampleRate, numChannels ?? 1);
+  }
+
+  // ---------------- Pre-processing helpers ----------------
+
+  List<double> _downmixToMono(Int16List s, int channels) {
+    if (channels <= 1) {
+      return List<double>.generate(s.length, (i) => s[i] / 32768.0);
+    }
+    final frames = s.length ~/ channels;
+    final out = List<double>.filled(frames, 0.0);
+    var idx = 0;
+    for (int f = 0; f < frames; f++) {
+      double acc = 0.0;
+      for (int c = 0; c < channels; c++) {
+        acc += s[idx++] / 32768.0;
+      }
+      out[f] = acc / channels;
+    }
+    return out;
+  }
+
+  /// Trim leading/trailing silence and normalize peak amplitude.
+  List<double> _trimSilenceAndNormalize(List<double> x, int sr) {
+    final int frame = max(1, (sr * 0.025).round()); // 25 ms
+    final int hop   = max(1, (sr * 0.010).round()); // 10 ms
+    final n = x.length;
+
+    // Frame RMS
+    final rms = <double>[];
+    for (int start = 0; start + frame <= n; start += hop) {
+      double sumSq = 0.0;
+      for (int i = start; i < start + frame; i++) {
+        final v = x[i];
+        sumSq += v * v;
+      }
+      rms.add(sqrt(sumSq / frame));
+    }
+    if (rms.isEmpty) return x;
+
+    final sorted = List<double>.from(rms)..sort();
+    final median = sorted[(sorted.length - 1) ~/ 2];
+    final thresh = max(0.008, median * 0.6);
+
+    int first = -1, last = -1;
+    for (int i = 0; i < rms.length; i++) {
+      if (rms[i] >= thresh) { first = i; break; }
+    }
+    for (int i = rms.length - 1; i >= 0; i--) {
+      if (rms[i] >= thresh) { last = i; break; }
+    }
+    if (first == -1 || last == -1 || last < first) {
+      return _normalizePeak(x);
+    }
+
+    final startSamp = (first * hop).clamp(0, n - 1);
+    final endSamp = min(n, last * hop + frame);
+    final cut = x.sublist(startSamp, endSamp);
+
+    final minKeep = max(1, (sr * 0.5).round());
+    if (cut.length < minKeep) return _normalizePeak(x);
+
+    return _normalizePeak(cut);
+  }
+
+  List<double> _normalizePeak(List<double> x) {
+    double peak = 0.0;
+    for (final v in x) {
+      final a = v.abs();
+      if (a > peak) peak = a;
+    }
+    if (peak < 1e-6) return x;
+    final scale = 0.98 / peak;
+    return [for (final v in x) v * scale];
+  }
+
+  // ---------------- Fallback heuristic embedding ----------------
+
+  Future<List<double>> _extractEmbeddingHeuristicFromWav(_Wav wav) async {
+    final n = wav.samples.length;
+    final x = List<double>.filled(n, 0.0);
+    double mean = 0.0;
+    for (int i = 0; i < n; i++) {
+      final v = wav.samples[i] / 32768.0;
+      x[i] = v; mean += v;
+    }
+    mean /= max(1, n);
+    const a = 0.97; // pre-emphasis
+    double prev = 0.0;
+    for (int i = 0; i < n; i++) {
+      final v = x[i] - mean;
+      final y = v - a * prev;
+      x[i] = y;
+      prev = v;
+    }
+
+    final int sr = wav.sampleRate;
+    final int frame = max(1, (sr * 0.025).round());
+    final int hop   = max(1, (sr * 0.010).round());
+
+    final rmsAll = <double>[];
+    final zcrAll = <double>[];
+    final freqs = <double>[200, 400, 800, 1600, 3200, 6000];
+    final bandLogsAll = List<List<double>>.generate(freqs.length, (_) => <double>[]);
+
+    for (int start = 0; start + frame <= n; start += hop) {
+      double sumSq = 0.0;
+      int zeroX = 0;
+
+      double sPrev = x[start];
+      for (int i = start; i < start + frame; i++) {
+        final s = x[i];
+        sumSq += s * s;
+        if ((sPrev >= 0 && s < 0) || (sPrev < 0 && s >= 0)) zeroX++;
+        sPrev = s;
+      }
+      final r = sqrt(sumSq / frame);
+      final z = zeroX / frame;
+      rmsAll.add(r);
+      zcrAll.add(z);
+
+      for (int fIdx = 0; fIdx < freqs.length; fIdx++) {
+        final pw = _goertzelPower(x, start, frame, freqs[fIdx], sr);
+        final lp = log(pw + 1e-12);
+        bandLogsAll[fIdx].add(lp);
+      }
+    }
+
+    List<int> keep = [];
+    if (rmsAll.isNotEmpty) {
+      final sorted = List<double>.from(rmsAll)..sort();
+      final median = sorted[(sorted.length - 1) ~/ 2];
+      final thresh = max(0.010, median * 0.6);
+      for (int i = 0; i < rmsAll.length; i++) {
+        if (rmsAll[i] >= thresh) keep.add(i);
+      }
+      if (keep.length < 8) {
+        final idxs = List<int>.generate(rmsAll.length, (i) => i);
+        idxs.sort((a, b) => rmsAll[b].compareTo(rmsAll[a]));
+        final k = max(8, (rmsAll.length * 0.2).round());
+        keep = idxs.take(k).toList();
+      }
+    }
+
+    List<double> _pick(List<double> xs) => [for (final i in keep) xs[i]];
+    final rms = _pick(rmsAll);
+    final zcr = _pick(zcrAll);
+    final bandLogs = List<List<double>>.generate(freqs.length, (j) => _pick(bandLogsAll[j]));
+
+    List<double> _stats(List<double> v) {
+      if (v.isEmpty) return [0, 0, 0, 0, 0, 0];
+      final sorted = List<double>.from(v)..sort();
+      final mean = v.reduce((a, b) => a + b) / v.length;
+      double varSum = 0.0;
+      for (final x in v) {
+        final d = x - mean;
+        varSum += d * d;
+      }
+      final std = sqrt(varSum / max(1, v.length - 1));
+      double q(double p) =>
+          sorted[(p * (sorted.length - 1)).clamp(0, (sorted.length - 1).toDouble()).round()];
+      final p25 = q(0.25), p50 = q(0.50), p75 = q(0.75);
+      final p05 = q(0.05), p95 = q(0.95);
+      final range = p95 - p05;
+      return [mean, std, p25, p50, p75, range];
+    }
+
+    final f = <double>[];
+    f.addAll(_stats(rms));  // 6
+    f.addAll(_stats(zcr));  // +6 = 12
+    for (final band in bandLogs) {
+      final s = _stats(band);
+      f.add(s[0]); // mean
+      f.add(s[1]); // std
+    } // +12 = 24 total dims
+
+    return _l2norm(f);
+  }
+
+  double _goertzelPower(List<double> x, int start, int len, double freq, int sr) {
+    if (len <= 0) return 0.0;
+    final k = (0.5 + len * freq / sr).floor();
+    final omega = 2.0 * pi * k / len;
+    final coeff = 2.0 * cos(omega);
+
+    double s0 = 0.0, s1 = 0.0, s2 = 0.0;
+    final end = start + len;
+    for (int i = start; i < end; i++) {
+      s0 = x[i] + coeff * s1 - s2;
+      s2 = s1;
+      s1 = s0;
+    }
+    final power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+    return max(power, 0.0);
+  }
+
+  // ---------------- Vector math ----------------
 
   List<double> _l2norm(List<double> v) {
     double nrm = 0.0;
