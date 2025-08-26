@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
-import 'dart:convert';
 import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as rec;
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:go_router/go_router.dart';
@@ -38,8 +38,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     "can you please repeat that",
     "i will call you later."
   ];
-  static const String _elevenLabsApiKey = ApiConstants.elevenLabsApiKey;
-  final List<String> _recordings = [];
   int _currentIndex = 0;
   bool _isRecording = false;
   bool _showTryAgain = false;
@@ -446,66 +444,64 @@ class _AddContactScreenState extends State<AddContactScreen>
         _showSnackbar("Voice not clear or too quiet. Please speak clearly.", Colors.redAccent);
         return;
       }
-      _recordings.add(_currentRecordingPath!);
-      setState(() => _showSuccess = true);
-      _checkBurst.forward(from: 0);
-      await Future.delayed(const Duration(milliseconds: 1200));
+      setState(() => _isUploading = true);
+      await _registerSpeakerAPI(_currentRecordingPath!);
       if (!mounted) return;
-      if (_currentIndex < _sentences.length - 1) {
-        setState(() {
-          _currentIndex++;
-          _showSuccess = false;
-          _progress = 0.0;
-          _userStartedSpeaking = false;
-        });
-        _revealWords();
-      } else {
-        setState(() => _isUploading = true);
-        try {
-          await _registerVoiceElevenLabs();
-          _showSnackbar(
-            "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
-            Colors.greenAccent,
-          );
-          await Future.delayed(const Duration(milliseconds: 800));
-          if (mounted) context.pop(true);
-        } catch (_) {
-          if (mounted) {
-            setState(() => _showTryAgain = true);
-            _showSnackbar("Network error. Please try again.", Colors.redAccent);
-          }
-        }
-        if (mounted) setState(() => _isUploading = false);
-      }
+      setState(() => _isUploading = false);
     } else {
       setState(() => _showTryAgain = true);
       _showSnackbar("No audio detected. Please try again.", Colors.redAccent);
     }
   }
 
-  Future<void> _registerVoiceElevenLabs() async {
-    final uri = Uri.parse('https://api.elevenlabs.io/v1/voices/add');
-    final req = http.MultipartRequest('POST', uri)
-      ..headers['xi-api-key'] = _elevenLabsApiKey
-      ..fields['name'] = _nameController!.text.trim();
-    for (final p in _recordings) {
-      req.files.add(await http.MultipartFile.fromPath('files', p));
-    }
-    final res = await http.Response.fromStream(await req.send());
-    print('dsjdjhsd ${res.statusCode}');
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      final voiceId = data['voice_id']?.toString();
-      if (voiceId != null) {
-        final prefs = await SharedPreferences.getInstance();
-        final raw = prefs.getString('voice_ids');
-        final Map<String, dynamic> map =
-            raw != null ? jsonDecode(raw) as Map<String, dynamic> : {};
-        map[_nameController!.text.trim()] = voiceId;
-        await prefs.setString('voice_ids', jsonEncode(map));
+  Future<void> _registerSpeakerAPI(String filePath) async {
+    try {
+      final uri = Uri.parse(
+        ApiConstants.registerSpeaker.endsWith('/')
+            ? ApiConstants.registerSpeaker
+            : '${ApiConstants.registerSpeaker}/',
+      );
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['name'] = _nameController!.text
+        ..fields['sentence_no'] = (_currentIndex + 1).toString()
+        ..fields['email'] = _email
+        ..files.add(await http.MultipartFile.fromPath(
+          'audio_file',
+          filePath,
+          contentType: MediaType('audio', 'm4a'),
+        ));
+      final resp = await req.send();
+      await resp.stream.toBytes();
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        setState(() => _showSuccess = true);
+        _checkBurst.forward(from: 0);
+        await Future.delayed(const Duration(milliseconds: 1200));
+        if (!mounted) return;
+        if (_currentIndex < _sentences.length - 1) {
+          setState(() {
+            _currentIndex++;
+            _showSuccess = false;
+            _progress = 0.0;
+            _userStartedSpeaking = false;
+          });
+          _revealWords();
+        } else {
+          _showSnackbar(
+            "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
+            Colors.greenAccent,
+          );
+          await Future.delayed(const Duration(milliseconds: 800));
+          if (!mounted) return;
+          context.pop(true);
+        }
+      } else {
+        setState(() => _showTryAgain = true);
       }
-    } else {
-      throw Exception('Failed to register voice');
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _showTryAgain = true);
+      _showSnackbar("Network error. Please try again.", Colors.redAccent);
     }
   }
 

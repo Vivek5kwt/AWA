@@ -2,18 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui';
-
 import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:go_router/go_router.dart';
+import 'package:wave_blob/wave_blob.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:wave_blob/wave_blob.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
@@ -28,35 +29,40 @@ class GroupSpeechToTextScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<GroupSpeechToTextScreen> createState() =>
-      _GroupSpeechToTextScreenState();
+  State<GroupSpeechToTextScreen> createState() => _GroupSpeechToTextScreenState();
 }
 
-class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
-    with TickerProviderStateMixin {
-  // ===================== CONFIG =====================
-  static const String _elevenLabsApiKey =
-      ApiConstants.elevenLabsApiKey; // <-- set your key
-  static const Duration _chunkDuration = Duration(seconds: 5);
-  static const int _minChunkBytes = 10 * 1024; // skip tiny/silent chunks
-
-  // ===================== UI / STATE =====================
+class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with TickerProviderStateMixin {
   bool _isRecording = false;
   double _amplitude = 0;
   Timer? _amplitudeTimer;
   late AnimationController _micGlowController;
+  final AudioRecorder _recorder = AudioRecorder();
 
   final List<Map<String, dynamic>> _messages = [];
+  int _speakerIndex = 0;
+  final List<Color> _userColors = [
+    const Color(0xFF50E3C2),
+    const Color(0xFF8E54E9),
+    const Color(0xFF4776E6),
+    const Color(0xFFFFA726),
+  ];
+
+  String? _currentFilePath;
   final TextEditingController _textController = TextEditingController();
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
-  String _email = '';
 
   final FlutterTts _flutterTts = FlutterTts();
 
   String _appLanguageCode = 'en';
-  bool _speakOnMeeting = true; // used only when sending typed messages
-  bool _showTextMyLanguage = false; // kept for UI toggle (typed text only)
+
+  bool _speakOnMeeting = true;
+  bool _showTextMyLanguage = false;
+
+  final List<_AudioQueueItem> _audioQueue = [];
+  bool _isApiProcessing = false;
+  int _audioLabel = 0;
 
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
@@ -68,13 +74,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   String _latestSentence = '';
   Timer? _latestSentenceTimer;
+  Timer? _silenceTimer;
+  final Duration _silenceDuration = const Duration(minutes: 2);
 
-  // ===================== AUDIO REC/CHUNKING =====================
-  final AudioRecorder _recorder = AudioRecorder();
-  Timer? _chunkTimer;
-  String? _currentFilePath;
-
-  // ===================== INIT =====================
   @override
   void initState() {
     super.initState();
@@ -84,13 +86,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
-
     _initUser();
     _initTTS();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
     _loadAppLanguageCode();
-
     _scrollController = ScrollController();
     _scrollController.addListener(_handleScroll);
 
@@ -99,25 +99,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _loadPreviousMessages();
   }
 
-  @override
-  void dispose() {
-    _amplitudeTimer?.cancel();
-    _latestSentenceTimer?.cancel();
-    _chunkTimer?.cancel();
-
-    _micGlowController.dispose();
-    _textController.dispose();
-    _flutterTts.stop();
-    _scrollController.dispose();
-    _recorder.dispose();
-    super.dispose();
-  }
-
-  // ===================== PREFS & USER =====================
   Future<void> _loadPreviousMessages() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? '';
-    _email = email;
     final doc = await _firestore
         .collection('meeting_histories')
         .doc('user_$email')
@@ -128,8 +112,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       final data = doc.data()!;
       setState(() {
         _messages.clear();
-        _messages.addAll(
-            List<Map<String, dynamic>>.from(data['messages'] ?? []));
+        _messages.addAll(List<Map<String, dynamic>>.from(data['messages'] ?? []));
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
@@ -149,6 +132,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         _shouldAutoscroll = false;
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _amplitudeTimer?.cancel();
+    _latestSentenceTimer?.cancel();
+    _silenceTimer?.cancel();
+    _micGlowController.dispose();
+    _textController.dispose();
+    _flutterTts.stop();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSpeakOnMeeting() async {
@@ -187,7 +182,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     setState(() {
       _myName = _capitalize(name);
       _myColor = const Color(0xFF1E88E5);
-      _email = email;
     });
   }
 
@@ -207,386 +201,444 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     return s[0].toUpperCase() + s.substring(1);
   }
 
-  // ===================== AMPLITUDE ANIM =====================
-  void _startAmplitude() {
+  String _generateTempFilePath() {
+    final tempDir = Directory.systemTemp;
+    return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
+  }
+
+  Future<void> _startListening() async {
+    if (!await _recorder.hasPermission()) return;
+
+    setState(() {
+      _isRecording = true;
+      _speakerIndex = 0;
+    });
+    _resetSilenceTimer();
+
     _amplitudeTimer?.cancel();
     _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 48), (_) {
       if (!_isRecording) return;
       setState(() {
-        // simple visual animation (not actual mic level)
         _amplitude = 2200 + Random().nextInt(3400).toDouble();
       });
     });
-  }
 
-  void _stopAmplitude() {
-    _amplitudeTimer?.cancel();
-    setState(() => _amplitude = 0);
-  }
-
-  // ===================== RECORDING (5s CHUNKS) =====================
-  String _newTempWavPath() =>
-      "${Directory.systemTemp.path}/chunk_${DateTime.now().millisecondsSinceEpoch}.wav";
-
-  Future<void> _startListening() async {
-    final hasPermission = await _recorder.hasPermission();
-    if (!hasPermission) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Microphone permission denied.")),
-      );
-      return;
-    }
-
-    _currentFilePath = _newTempWavPath();
+    _currentFilePath = _generateTempFilePath();
     await _recorder.start(
-      const RecordConfig(
+      RecordConfig(
         encoder: AudioEncoder.wav,
+        bitRate: 256000,
         sampleRate: 44100,
-        bitRate: 128000,
         numChannels: 1,
       ),
       path: _currentFilePath!,
     );
 
-    _startAmplitude();
-    _chunkTimer?.cancel();
-    _chunkTimer =
-        Timer.periodic(_chunkDuration, (_) => _sliceAndSendChunk());
 
-    setState(() {
-      _isRecording = true;
-    });
+
+    _continueRecordingCycle();
   }
 
-  Future<void> _stopListening() async {
-    _chunkTimer?.cancel();
-    _chunkTimer = null;
+  Future<void> _continueRecordingCycle() async {
+    while (_isRecording) {
+      await Future.delayed(const Duration(seconds: 5));
+      if (!_isRecording) break;
 
-    final lastPath = await _recorder.stop();
-    _stopAmplitude();
-    setState(() {
-      _isRecording = false;
-    });
-
-    if (lastPath != null) {
-      final file = File(lastPath);
-      if (_shouldSendChunk(file)) {
-        unawaited(_transcribeAuto(file));
-      } else {
-        try {
-          if (await file.exists()) await file.delete();
-        } catch (_) {}
+      final String? stoppedPath = await _recorder.stop();
+      if (stoppedPath != null) {
+        final File audioFile = File(stoppedPath);
+        final label = _audioLabel++;
+        bool shouldSend = await _isAudioSignificant(audioFile);
+        if (shouldSend) {
+          _resetSilenceTimer();
+          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
+          _processAudioQueue();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("No voice detected, try again!"),
+              backgroundColor: Colors.orange.shade400,
+              duration: const Duration(milliseconds: 900),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
-    }
-  }
 
-  Future<void> _sliceAndSendChunk() async {
-    if (!_isRecording) return;
+      if (!_isRecording) break;
 
-    String? finished;
-    try {
-      finished = await _recorder.stop();
-    } catch (_) {}
-
-    try {
-      _currentFilePath = _newTempWavPath();
+      _currentFilePath = _generateTempFilePath();
       await _recorder.start(
-        const RecordConfig(
+        RecordConfig(
           encoder: AudioEncoder.wav,
+          bitRate: 256000,
           sampleRate: 44100,
-          bitRate: 128000,
           numChannels: 1,
         ),
         path: _currentFilePath!,
       );
-    } catch (e) {
-      _stopAmplitude();
-      setState(() => _isRecording = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Recorder error: $e")),
-      );
-      return;
-    }
-
-    if (finished != null) {
-      final file = File(finished);
-      if (_shouldSendChunk(file)) {
-        unawaited(_transcribeAuto(file));
-      } else {
-        try {
-          if (await file.exists()) await file.delete();
-        } catch (_) {}
-      }
     }
   }
 
-  bool _shouldSendChunk(File f) {
+  Future<bool> _isAudioSignificant(File file) async {
     try {
-      final len = f.lengthSync();
-      return len >= _minChunkBytes;
+      if (!(await file.exists())) return false;
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 6000) return false;
+      if (bytes.length > 44) {
+        Uint8List pcm = bytes.sublist(44);
+        int silentCount = 0;
+        for (int i = 0; i < pcm.length; i += 2) {
+          int val = pcm[i] | (pcm[i + 1] << 8);
+          if (val.abs() < 300) silentCount++;
+        }
+        if (silentCount > (pcm.length ~/ 2 * 0.90)) return false;
+      }
+      return true;
     } catch (_) {
       return false;
     }
   }
 
-  Future<String?> _identifySpeaker(File file) async {
-    try {
-      final uri = Uri.parse(ApiConstants.identifySpeakerNative);
-      final req = http.MultipartRequest('POST', uri)
-        ..fields['email'] = _email
-        ..files.add(await http.MultipartFile.fromPath('file', file.path));
+  Future<void> _stopListening() async {
+    setState(() {
+      _isRecording = false;
+      _amplitude = 0;
+    });
+    _silenceTimer?.cancel();
+    _amplitudeTimer?.cancel();
 
-      final streamed = await req.send();
-      final res = await http.Response.fromStream(streamed);
-      debugPrint('Identify speaker → ${res.statusCode}');
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final name = data['speaker'] ?? data['name'];
-        return name?.toString();
-      } else {
-        debugPrint('Identify error ${res.statusCode}: ${res.body}');
-      }
-    } catch (e) {
-      debugPrint('Identify exception: $e');
+    String? stoppedPath;
+    if (await _recorder.isRecording()) {
+      stoppedPath = await _recorder.stop();
+    } else if (_currentFilePath != null) {
+      stoppedPath = _currentFilePath;
     }
-    return null;
-  }
 
-  // ===================== STT (AUTO-DETECT ONLY) =====================
-  Future<void> _transcribeAuto(File file) async {
-    try {
-      final data = await _stt(file); // auto detect; no language_code param
-      if (data != null) {
-        final text = (data['text'] ?? '').toString().trim();
-        if (text.isNotEmpty) {
-          // Only add transcripts that look like real speech
-          if (_isLikelySpeech(text, data)) {
-            final code =
-                _code3ToLang((data['language_code'] ?? '').toString());
-            final speaker = await _identifySpeaker(file) ?? 'Mic';
-            _addTranscriptLine(text, lang: code, speaker: speaker);
+    if (stoppedPath != null) {
+      final file = File(stoppedPath);
+      if (await file.exists()) {
+        int durationSec = await _getWavDurationSeconds(file);
+        if (durationSec <= 19 && durationSec >= 1) {
+          final label = _audioLabel++;
+          bool shouldSend = await _isAudioSignificant(file);
+          if (shouldSend) {
+            _resetSilenceTimer();
+            _audioQueue.add(_AudioQueueItem(file: file, label: label));
+            _processAudioQueue();
           }
-        } else {
-          debugPrint("STT returned empty text.");
         }
-      } else {
-        debugPrint("STT failed for a chunk.");
       }
-    } catch (e) {
-      debugPrint("STT exception: $e");
-    } finally {
-      try {
-        if (await file.exists()) await file.delete();
-      } catch (_) {}
     }
   }
+  Future<int> _getWavDurationSeconds(File file) async {
+    try {
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 44) return 0;
+      final byteRate = bytes.buffer.asByteData().getUint32(28, Endian.little);
+      final dataLen = bytes.length - 44;
+      if (byteRate > 0) return (dataLen ~/ byteRate).clamp(0, 1000);
+    } catch (_) {}
+    return 0;
+  }
 
-  Future<Map<String, dynamic>?> _stt(File file) async {
-    final uri = Uri.parse("https://api.elevenlabs.io/v1/speech-to-text");
 
-    final req = http.MultipartRequest("POST", uri)
-      ..headers['xi-api-key'] = _elevenLabsApiKey
-      ..fields['model_id'] = 'scribe_v1'
-      ..files.add(await http.MultipartFile.fromPath("file", file.path));
-
-    final streamed = await req.send();
-    final res = await http.Response.fromStream(streamed);
-    final body = utf8.decode(res.bodyBytes);
-
-    debugPrint("STT auto → ${res.statusCode}");
-    if (res.statusCode == 200) {
-      try {
-        return jsonDecode(body) as Map<String, dynamic>;
-      } catch (e) {
-        debugPrint("JSON parse error: $e");
-        return null;
+  // Allow English and major Indian scripts so that Hindi or other
+  // Indian languages are not filtered out when app language is English.
+  bool _isTextInLanguage(String text, String languageCode) {
+    if (languageCode == 'en') {
+      final englishLetters =
+      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
+      final hasIndianChars = RegExp(
+          r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF'
+          r'\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF'
+          r'\u0D00-\u0D7F\u0D80-\u0DFF]'
+      ).hasMatch(text);
+      if (englishLetters.length > text.length * 0.6 || hasIndianChars) {
+        return true;
       }
-    } else {
-      debugPrint("STT error ${res.statusCode}: $body");
-      return null;
-    }
-  }
-
-  // ===================== HEURISTICS (no translation, stricter noise filter) =====================
-  bool _hasIndicScript(String t) {
-    return RegExp(
-      r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]',
-    ).hasMatch(t);
-  }
-
-  bool _hasArabicScript(String t) {
-    return RegExp(r'[\u0600-\u06FF]').hasMatch(t);
-  }
-
-  bool _isEnvironmentNoiseText(String t) {
-    final text = t.toLowerCase().trim();
-
-    // Treat lines with "sound" repeated as background noise
-    final soundCount = RegExp(r'\bsound\b').allMatches(text).length;
-    if (soundCount >= 2) return true;
-
-    // environmental keywords (EN + Hindi)
-    const env = [
-      'wind', 'blowing', 'gust', 'breeze', 'fan', 'ac', 'air conditioner',
-      'ac noise', 'hum', 'static', 'mic noise', 'traffic', 'car horn',
-      'horn', 'horns', 'sirens', 'rain', 'raindrops', 'thunder',
-      'storm', 'thunderstorm', 'waves', 'ocean', 'sea', 'water',
-      'waterfall', 'river', 'stream', 'running water', 'keyboard', 'typing',
-      'footsteps', 'door closing', 'door slam', 'background music', 'music',
-      'background sound', 'fan sound', 'running sound', 'sound of fan',
-      'sound of ac', 'sound of air conditioner', 'sound of traffic',
-      'sound of rain', 'applause', 'clapping', 'crowd', 'crowded', 'noise',
-      'ambient', 'echo',
-      // Hindi
-      'हवा', 'तेज हवा', 'फैन', 'पंखा', 'एसी', 'ए सी', 'शोर', 'आवाज़', 'शोरगुल',
-      'बारिश', 'बूंदें', 'तूफान', 'गर्जना', 'लहर', 'लहरें', 'समुद्र', 'पानी',
-      'नदी', 'जलप्रपात', 'कीबोर्ड', 'टाइपिंग', 'कदमों', 'दरवाज़ा', 'दरवाजा',
-      'तालियाँ', 'तालियां', 'क्लैप', 'भीड़', 'संगीत', 'हॉर्न', 'हॉर्न्स', 'सायरन'
-    ];
-
-    // clearly speechy keywords — if present, don't treat as noise
-    const speechy = [
-      // English
-      'i', 'we', 'you', 'he', 'she', 'they', 'my', 'your', 'our', 'me', 'us',
-      'is', 'are', 'am', 'have', 'do', 'say', 'want', 'need', 'please', 'hello',
-      'hi', 'name',
-      // Hindi
-      'मैं', 'मुझे', 'मेरा', 'आप', 'तुम', 'हम', 'हैं', 'हूँ', 'है', 'कर', 'रहा',
-      'रही', 'चाहता', 'चाहती', 'कहना', 'कह', 'नाम', 'कृपया', 'नमस्ते', 'हैलो'
-    ];
-
-    final words =
-        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    final hasEnv = env.any((k) => text.contains(k));
-    final hasSpeechy = speechy.any((k) => text.contains(k));
-
-    // if it mentions environment and lacks speech markers and is short, drop
-    if (hasEnv && !hasSpeechy && words.length <= 12) return true;
-
-    return false;
-  }
-
-  String _code3ToLang(String code3) {
-    switch (code3) {
-      case 'eng':
-        return 'en';
-      case 'hin':
-        return 'hi';
-      case 'tam':
-        return 'ta';
-      case 'tel':
-        return 'te';
-      case 'ben':
-        return 'bn';
-      case 'mar':
-        return 'mr';
-      case 'kan':
-        return 'kn';
-      case 'guj':
-        return 'gu';
-      case 'mal':
-        return 'ml';
-      case 'urd':
-        return 'ur';
-      default:
-        return code3;
-    }
-  }
-
-  bool _isLikelySpeech(String text, Map<String, dynamic> data) {
-    final t = text.trim();
-    if (t.isEmpty) return false;
-
-    // filter obvious environment lines
-    if (_isEnvironmentNoiseText(t)) return false;
-
-    // minimum substance
-    if (t.length < 4) return false;
-
-    // letters share
-    final letters = RegExp(r'\p{L}', unicode: true).allMatches(t).length;
-    final lettersRatio = letters / max(1, t.length);
-    if (lettersRatio < 0.45) return false;
-
-    // punctuation density
-    final punct = RegExp(r'[^\p{L}\p{N}\s]', unicode: true).allMatches(t).length;
-    final punctRatio = punct / max(1, t.length);
-    if (punctRatio > 0.35) return false;
-
-    // at least 2 words or >= 10 chars
-    final words = t.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    if (words.length < 2 && t.length < 10) return false;
-
-    // filler-only
-    final fillers = {'uh', 'umm', 'um', 'hmm', 'huh', 'ah', 'oh', 'hmmm', 'अं', 'हूं'};
-    if (words.length <= 2 &&
-        words.every((w) => fillers.contains(w.toLowerCase()))) {
       return false;
     }
+    return true;
+  }
 
-    // repetition
-    final norm = t.toLowerCase().replaceAll(RegExp(r'\s+'), '');
-    final counts = <String, int>{};
-    for (final ch in norm.split('')) {
-      counts[ch] = (counts[ch] ?? 0) + 1;
-    }
-    if (norm.isNotEmpty) {
-      final maxRepeat = counts.values.reduce((a, b) => a > b ? a : b);
-      if ((maxRepeat / norm.length) > 0.6) return false;
-    }
+  void _resetSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceDuration, _handleSilenceTimeout);
+  }
 
-    // language probability (auto)
-    final prob = (data['language_probability'] is num)
-        ? (data['language_probability'] as num).toDouble()
-        : null;
+  void _handleSilenceTimeout() {
+    if (!_isRecording) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No voice detected'),
+        content: const Text(
+            'No voice detected for a while. Stop the conversation? You can start again when your meeting begins. Your meeting is saved.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _stopListening();
+            },
+            child: const Text('Stop'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resetSilenceTimer();
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+  }
 
-    final hasIndic = _hasIndicScript(t);
-    final hasArabic = _hasArabicScript(t);
-
-    // Be friendly for non-English scripts and allow shorter phrases
-    if (hasIndic || hasArabic) {
-      // Lower probability threshold to reduce false negatives for Indic/Arabic text
-      if (prob == null || prob >= 0.30) {
-        if (words.length >= 2 || t.length >= 8) return true;
+  void _scrollToBottom({bool animate = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: animate ? const Duration(milliseconds: 350) : Duration.zero,
+          curve: Curves.easeOut,
+        );
       }
+    });
+  }
+
+  void _processAudioQueue() async {
+    if (_isApiProcessing || _audioQueue.isEmpty) return;
+    _isApiProcessing = true;
+    while (_audioQueue.isNotEmpty) {
+      final item = _audioQueue.removeAt(0);
+      await _hitIdentifySpeaker(item.file, item.label);
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+    _isApiProcessing = false;
+  }
+
+  Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
+    final prefs = await SharedPreferences.getInstance();
+    final storedEmail = prefs.getString('email') ?? '';
+
+    final base = _showTextMyLanguage
+        ? ApiConstants.identifySpeakerNative
+        : ApiConstants.identifySpeaker;
+    Uri uri = Uri.parse('$base?email=$storedEmail&label=$label');
+    void showAccountDeletedDialog() {
+      showGeneralDialog(
+        context: context,
+        barrierDismissible: false,
+        barrierLabel: "accountDeleted",
+        pageBuilder: (ctx, _, __) => WillPopScope(
+          onWillPop: () async => false,
+          child: Container(
+            color: widget.isDarkMode ? Color(0xFF181A20) : Color(0xFFFCF6BA),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                child: Material(
+                  borderRadius: BorderRadius.circular(26),
+                  color: widget.isDarkMode
+                      ? Colors.blueGrey[900]!.withOpacity(0.98)
+                      : Colors.white.withOpacity(0.97),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(30),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.block_rounded,
+                          color: widget.isDarkMode
+                              ? Colors.cyanAccent
+                              : Colors.deepPurpleAccent,
+                          size: 55,
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          "Your account has been blocked",
+                          style: TextStyle(
+                            color: widget.isDarkMode
+                                ? Colors.cyanAccent
+                                : Colors.deepPurpleAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 22,
+                            letterSpacing: 1.1,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "For security reasons, your account was blocked by admin. Please contact our support team for assistance.",
+                          style: TextStyle(
+                            color: widget.isDarkMode
+                                ? Colors.white70
+                                : Colors.blueGrey.shade700,
+                            fontSize: 16,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 26),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: widget.isDarkMode
+                                ? Colors.cyanAccent.withOpacity(0.85)
+                                : Colors.deepPurpleAccent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 38, vertical: 14),
+                          ),
+                          icon: Icon(
+                            Icons.support_agent_rounded,
+                            color: widget.isDarkMode ? Colors.black : Colors.white,
+                            size: 26,
+                          ),
+                          label: Text(
+                            "Contact Support",
+                            style: TextStyle(
+                                color: widget.isDarkMode
+                                    ? Colors.black
+                                    : Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 17.3),
+                          ),
+                          onPressed: () {
+                            context.go(Routes.login);
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextButton(
+                            onPressed: () {
+                              context.go(Routes.login);
+                            },
+                            child: Text(
+                              "Exit App",
+                              style: TextStyle(
+                                  color: widget.isDarkMode
+                                      ? Colors.cyanAccent
+                                      : Colors.deepPurpleAccent,
+                                  fontSize: 15.5,
+                                  fontWeight: FontWeight.bold),
+                            )
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    Future<http.StreamedResponse> sendRequest(Uri targetUri) {
+      final request = http.MultipartRequest('POST', targetUri)
+        ..files.add(
+          http.MultipartFile.fromBytes(
+            'audio_file',
+            audioFile.readAsBytesSync(),
+            filename: audioFile.path.split('/').last,
+            contentType: MediaType('audio', 'wav'),
+          ),
+        );
+      return request.send();
     }
 
-    // General accept if probability high enough
-    if (prob != null && prob >= 0.70) return true;
+    try {
+      http.StreamedResponse streamed = await sendRequest(uri);
+      http.Response response = await http.Response.fromStream(streamed);
 
-    // As a last resort, accept longer lines that look like sentences
-    if (t.length >= 18 && lettersRatio >= 0.6) return true;
+      if (response.statusCode == 307 || response.statusCode == 302) {
+        final location = streamed.headers['location'];
+        if (location != null) {
+          uri = Uri.parse(location);
+          streamed = await sendRequest(uri);
+          response = await http.Response.fromStream(streamed);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Redirect without Location header'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          return;
+        }
+      }
+      if (response.statusCode == 204) {
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (mounted) showAccountDeletedDialog();
+        setState(() {
+        });
+        return;
+      }
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final speakers = body['speakers'] as List<dynamic>;
 
-    return false;
+        setState(() {
+          for (var speakerEntry in speakers) {
+            final key = (speakerEntry as Map<String, dynamic>).keys.first;
+            final data = speakerEntry[key] as Map<String, dynamic>;
+            final name = data['name'] as String? ?? 'Unknown';
+            final text = data['spoken_text'] as String? ?? '';
+            final time = TimeOfDay.now().format(context);
+
+            if (text.trim().isEmpty) {
+              continue;
+            }
+            if (!_showTextMyLanguage &&
+                !_isTextInLanguage(text, _appLanguageCode)) {
+              continue;
+            }
+
+            _messages.add({
+              'user': name,
+              'text': text,
+              'time': time,
+              'isMe': false,
+              'spoken': false,
+              'audioLabel': label,
+            });
+            _latestSentence = text;
+            _latestSentenceTimer?.cancel();
+            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+              setState(() {
+                _latestSentence = '';
+              });
+            });
+            _speakerIndex++;
+          }
+        });
+
+        await _saveCurrentMeetingToFirestore();
+        if (_shouldAutoscroll) _scrollToBottom(animate: true);
+      } else {
+        final errorBody = response.body.isNotEmpty
+            ? response.body
+            : 'No error message from API';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('API error ${response.statusCode}: $errorBody'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to call API: $e'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
-  // ===================== APPENDING TRANSCRIPTS =====================
-  void _addTranscriptLine(String text,
-      {required String lang, required String speaker}) async {
-    final line = text.trim();
-    if (line.isEmpty) return;
-
-    setState(() {
-      _messages.add({
-        'user': speaker,
-        'text': line,
-        'time': TimeOfDay.now().format(context),
-        'isMe': speaker.toLowerCase() == _myName.toLowerCase(),
-        'spoken': false,
-      });
-      _latestSentence = line;
-    });
-
-    _latestSentenceTimer?.cancel();
-    _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _latestSentence = '');
-    });
-
-    await _saveCurrentMeetingToFirestore();
-    if (_shouldAutoscroll) _scrollToBottom(animate: true);
-  }
-
-  // ===================== SENDING TYPED MESSAGE (optional TTS) =====================
   Future<void> _sendTextMessage() async {
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
@@ -601,11 +653,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       });
       _textController.clear();
       _latestSentence = msg;
-    });
-
-    _latestSentenceTimer?.cancel();
-    _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _latestSentence = '');
+      _latestSentenceTimer?.cancel();
+      _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+        setState(() {
+          _latestSentence = '';
+        });
+      });
     });
 
     await _saveCurrentMeetingToFirestore();
@@ -618,10 +671,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   Future<void> _speakMyLastMessage(String msg) async {
-    final lastIndex = _messages.lastIndexWhere(
+    int lastIndex = _messages.lastIndexWhere(
             (m) => m['isMe'] == true && m['text'] == msg && m['spoken'] == false);
     if (lastIndex == -1) return;
     await _flutterTts.speak(msg);
+
     setState(() {
       _messages[lastIndex]['spoken'] = true;
     });
@@ -637,7 +691,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     }
   }
 
-  // ===================== SAVE HISTORY =====================
   Future<void> _saveCurrentMeetingToFirestore() async {
     if (_savingHistory) return;
     _savingHistory = true;
@@ -661,60 +714,20 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _savingHistory = false;
   }
 
-  // ===================== UI HELPERS =====================
-  void _scrollToBottom({bool animate = true}) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: animate
-              ? const Duration(milliseconds: 350)
-              : Duration.zero,
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  // kept for language toggle on typed text (STT always shows original language)
-  bool _isTextInLanguage(String text, String languageCode) {
-    if (languageCode == 'en') {
-      final englishLetters =
-      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
-      final hasIndianChars = RegExp(
-        r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF'
-        r'\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF'
-        r'\u0D00-\u0D7F\u0D80-\u0DFF]',
-      ).hasMatch(text);
-      if (englishLetters.length > text.length * 0.6 || hasIndianChars) {
-        return true;
-      }
-      return false;
-    }
-    return true;
-  }
-
-  // ===================== BUILD =====================
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    const double waveSize = 90;
-    const double micSize = 55;
+    final double waveSize = 90;
+    final double micSize = 55;
 
     final gradientColors = widget.isDarkMode
         ? [const Color(0xFF181A20), const Color(0xFF232526), const Color(0xFF181A20)]
         : [const Color(0xFF0093E9), const Color(0xFF80D0C7), const Color(0xFFFCF6BA)];
 
-    final textPrimary =
-    widget.isDarkMode ? Colors.white : Colors.black;
-    final textSecondary = widget.isDarkMode
-        ? Colors.white70
-        : Colors.blueGrey.shade900.withOpacity(0.6);
-    final chatInputColor = widget.isDarkMode
-        ? Colors.blueGrey.shade900.withOpacity(0.6)
-        : Colors.white;
-    final sendBtnColor =
-    widget.isDarkMode ? Colors.cyanAccent : Colors.blueAccent;
+    final textPrimary = widget.isDarkMode ? Colors.white : Colors.black;
+    final textSecondary = widget.isDarkMode ? Colors.white70 : Colors.blueGrey.shade900.withOpacity(0.6);
+    final chatInputColor = widget.isDarkMode ? Colors.blueGrey.shade900.withOpacity(0.6) : Colors.white;
+    final sendBtnColor = widget.isDarkMode ? Colors.cyanAccent : Colors.blueAccent;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -770,7 +783,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                         ? Colors.cyanAccent.withOpacity(0.13)
                         : Colors.deepPurpleAccent.withOpacity(0.07),
                     blurRadius: 10,
-                    offset: const Offset(0, 3),
+                    offset: Offset(0, 3),
                   ),
                 ],
               ),
@@ -794,6 +807,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                     MaterialPageRoute(
                       builder: (_) => MeetingHistoryScreen(
                         isDark: widget.isDarkMode,
+                        userColors: _userColors,
                       ),
                     ),
                   );
@@ -822,7 +836,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                         ? Colors.cyanAccent.withOpacity(0.13)
                         : Colors.deepPurpleAccent.withOpacity(0.07),
                     blurRadius: 10,
-                    offset: const Offset(0, 3),
+                    offset: Offset(0, 3),
                   ),
                 ],
               ),
@@ -951,7 +965,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                           final spoken = msg['spoken'] ?? false;
                           final color = isMe
                               ? (widget.isDarkMode ? Colors.blue : Colors.deepPurpleAccent)
-                              : _myColor;
+                              : _userColors[index % _userColors.length];
                           return Align(
                             alignment: isMe
                                 ? Alignment.centerRight
@@ -1004,9 +1018,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                         backgroundColor: color,
                                         radius: 14,
                                         child: Text(
-                                          (msg['user'] as String).isNotEmpty
-                                              ? (msg['user'] as String)[0].toUpperCase()
-                                              : "?",
+                                          (msg['user'] as String)[0].toUpperCase(),
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontWeight: FontWeight.bold,
@@ -1014,7 +1026,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                         ),
                                       ),
                                       Text(
-                                        isMe ? _myName : (msg['user'] as String),
+                                        isMe
+                                            ? _myName
+                                            : msg['user'] as String,
                                         style: TextStyle(
                                           color: isMe
                                               ? Colors.white
@@ -1061,7 +1075,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                         )
                                             : const SizedBox.shrink()
                                             : IconButton(
-                                          icon: const Icon(Icons.play_circle_fill_rounded,
+                                          icon: Icon(Icons.play_circle_fill_rounded,
                                               color: Colors.deepPurpleAccent, size: 26),
                                           tooltip: "Tap to play this message",
                                           onPressed: () => _replaySpeak(index),
@@ -1149,9 +1163,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                           ],
                         ),
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
-                          children: [
+                          children: const [
                             Icon(Icons.arrow_downward, color: Colors.white, size: 22),
                             SizedBox(width: 6),
                             Text("New message", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
@@ -1271,7 +1285,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                   shape: BoxShape.circle,
                                   gradient: LinearGradient(
                                     colors: _isRecording
-                                        ? [Colors.red, Colors.deepOrange]
+                                        ? [
+                                      Colors.red,
+                                      Colors.deepOrange,
+                                    ]
                                         : widget.isDarkMode
                                         ? [Colors.deepPurple, Colors.cyanAccent]
                                         : [Color(0xFF8E54E9), Color(0xFF50E3C2)],
@@ -1291,7 +1308,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                   ],
                                 ),
                                 child: Icon(
-                                  _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                                  _isRecording
+                                      ? Icons.stop_rounded
+                                      : Icons.mic_rounded,
                                   size: 30,
                                   color: Colors.white,
                                 ),
@@ -1310,14 +1329,19 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       ),
     );
   }
-
-  // small helper to ignore unawaited futures
-  void unawaited(Future<void> f) {}
 }
+
+class _AudioQueueItem {
+  final File file;
+  final int label;
+  _AudioQueueItem({required this.file, required this.label});
+}
+
 
 class MeetingHistoryScreen extends StatelessWidget {
   final bool isDark;
-  const MeetingHistoryScreen({Key? key, required this.isDark}) : super(key: key);
+  final List<Color> userColors;
+  const MeetingHistoryScreen({Key? key, required this.isDark, required this.userColors}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -1425,7 +1449,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                       ? [Colors.cyanAccent, Colors.white]
                                       : [Colors.deepPurple, Colors.amber],
                                 ).createShader(rect),
-                                child: const Text(
+                                child: Text(
                                   "No meetings yet.\nLet's talk!",
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
@@ -1494,7 +1518,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                               Shadow(
                                                   color: isDark ? Colors.cyanAccent.withOpacity(0.16) : Colors.deepPurpleAccent.withOpacity(0.15),
                                                   blurRadius: 7,
-                                                  offset: const Offset(1, 2)
+                                                  offset: Offset(1, 2)
                                               )
                                             ],
                                           ),
@@ -1530,7 +1554,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                                   ).createShader(rect),
                                                   child: Text(
                                                     context.loc.conversation,
-                                                    style: const TextStyle(
+                                                    style: TextStyle(
                                                       color: Colors.white,
                                                       fontWeight: FontWeight.bold,
                                                       fontSize: 15.8,
@@ -1545,7 +1569,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                                 final isMe = msg['isMe'] ?? false;
                                                 final color = isMe
                                                     ? (isDark ? Colors.cyanAccent : Colors.deepPurpleAccent)
-                                                    : Colors.blueGrey;
+                                                    : userColors[entry.key % userColors.length];
                                                 return Padding(
                                                   padding: const EdgeInsets.symmetric(vertical: 6),
                                                   child: Row(
@@ -1591,7 +1615,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                                                               BoxShadow(
                                                                 color: color.withOpacity(0.08),
                                                                 blurRadius: 8,
-                                                                offset: const Offset(0, 3),
+                                                                offset: Offset(0, 3),
                                                               ),
                                                             ],
                                                           ),
@@ -1615,8 +1639,8 @@ class MeetingHistoryScreen extends StatelessWidget {
                                                                         color: Colors.amber.withOpacity(0.12),
                                                                         borderRadius: BorderRadius.circular(9),
                                                                       ),
-                                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                                      child: const Row(
+                                                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                      child: Row(
                                                                         children: [
                                                                           Icon(Icons.verified, size: 14, color: Colors.amber),
                                                                           SizedBox(width: 2),
