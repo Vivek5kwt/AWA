@@ -63,6 +63,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   final SpeakerService _speakerService = SpeakerService();
   final stt.SpeechToText _speech = stt.SpeechToText();
   String _currentText = '';
+  bool _speechEnabled = false;
 
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
@@ -90,6 +91,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _scrollController.addListener(_handleScroll);
 
     _speakerService.init();
+    _initSpeech();
   }
 
   void _handleScroll() {
@@ -171,6 +173,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     });
   }
 
+  Future<void> _initSpeech() async {
+    _speechEnabled = await _speech.initialize();
+  }
+
   String _capitalize(String s) {
     if (s.isEmpty) return s;
     return s[0].toUpperCase() + s.substring(1);
@@ -183,6 +189,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   Future<void> _startListening() async {
     if (!await _recorder.hasPermission()) return;
+
+    if (!_speechEnabled) {
+      _speechEnabled = await _speech.initialize();
+      if (!_speechEnabled) return;
+    }
 
     setState(() {
       _isRecording = true;
