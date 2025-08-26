@@ -280,18 +280,26 @@ class SpeakerService {
     // Downmix to mono (if device ignored mono request)
     final mono = _downmixToMono(wav.samples, wav.numChannels);
 
-    // Trim silence + normalize; also enforce min speech duration
-    final trimmed = _trimSilenceAndNormalize(mono, wav.sampleRate);
-    final speechSec = trimmed.length / wav.sampleRate;
+    // Trim silence + normalize
+    var processed = _trimSilenceAndNormalize(mono, wav.sampleRate);
+
+    // Resample to 16 kHz if needed for model accuracy/speed
+    const targetSr = 16000;
+    if (wav.sampleRate != targetSr) {
+      processed = _resampleLinear(processed, wav.sampleRate, targetSr);
+    }
+
+    // Enforce minimum speech duration
+    final speechSec = processed.length / targetSr;
     if (speechSec < 1.2) {
       throw StateError('Please speak clearly for at least 1.2 seconds.');
     }
 
     if (_extractor != null) {
-      final f32 = Float32List.fromList(trimmed);
+      final f32 = Float32List.fromList(processed);
       final stream = _extractor!.createStream();
       try {
-        stream.acceptWaveform(samples: f32, sampleRate: wav.sampleRate);
+        stream.acceptWaveform(samples: f32, sampleRate: targetSr);
         stream.inputFinished();
         while (!_extractor!.isReady(stream)) {
           await Future.delayed(const Duration(milliseconds: 2));
@@ -303,8 +311,8 @@ class SpeakerService {
       }
     } else {
       final wav2 = _Wav(Int16List.fromList(
-        trimmed.map((v) => (v * 32768.0).clamp(-32768.0, 32767.0).toInt()).toList(),
-      ), wav.sampleRate, 1);
+        processed.map((v) => (v * 32768.0).clamp(-32768.0, 32767.0).toInt()).toList(),
+      ), targetSr, 1);
       return _extractEmbeddingHeuristicFromWav(wav2);
     }
   }
@@ -432,6 +440,23 @@ class SpeakerService {
     if (peak < 1e-6) return x;
     final scale = 0.98 / peak;
     return [for (final v in x) v * scale];
+  }
+
+  /// Linear resample from [srcSr] to [dstSr].
+  List<double> _resampleLinear(List<double> x, int srcSr, int dstSr) {
+    if (srcSr == dstSr || x.isEmpty) return x;
+    final ratio = dstSr / srcSr;
+    final m = max(1, (x.length * ratio).round());
+    final out = List<double>.filled(m, 0.0);
+    for (int i = 0; i < m; i++) {
+      final t = i / ratio;
+      final idx = t.floor();
+      final frac = t - idx;
+      final a = x[idx];
+      final b = idx + 1 < x.length ? x[idx + 1] : a;
+      out[i] = a + (b - a) * frac;
+    }
+    return out;
   }
 
   // ---------------- Fallback heuristic embedding ----------------
