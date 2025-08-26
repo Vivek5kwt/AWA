@@ -184,33 +184,29 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
       _speakers = [];
     });
     try {
-      // Fetch voices from ElevenLabs instead of the legacy list_speakers API
-      final uri = Uri.parse(ApiConstants.listElevenLabsVoices);
-      final resp = await http.get(uri, headers: {
-        'xi-api-key': ApiConstants.elevenLabsApiKey,
-      });
+      final uri = Uri.parse('${ApiConstants.listSpeaker}$_email');
+      final resp = await http.get(uri);
 
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final raw = data['voices'] as List<dynamic>? ?? [];
+      // ==== FIXED LOGIC ====
+      if (resp.statusCode == 204) {
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (mounted) showAccountDeletedDialog();
         setState(() {
-          _speakers = raw
-              .map((e) => Speaker(
-                    id: e['voice_id'] as String,
-                    name: e['name'] as String? ?? '',
-                    email: '',
-                    embeddingCount:
-                        (e['samples'] is List) ? (e['samples'] as List).length : 0,
-                  ))
-              .toList();
+          _loading = false;
+        });
+        return;
+      } else if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final raw = data['speakers'] as List<dynamic>? ?? [];
+        setState(() {
+          _speakers = raw.map((e) => Speaker.fromJson(e as Map<String, dynamic>)).toList();
           _error = null; // no error
         });
         _listAnimController.forward(from: 0);
-      } else if (resp.statusCode == 401) {
-        setState(() => _error = 'Invalid ElevenLabs API key');
       } else {
         setState(() => _error = 'Load failed: ${resp.statusCode}');
       }
+      // =====================
     } catch (e) {
       setState(() => _error = 'Error: $e');
     } finally {
@@ -253,21 +249,95 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     }
   }
   Future<void> _deleteSpeaker(Speaker s) async {
-    setState(() {
-      _speakers.removeWhere((element) => element.id == s.id);
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Speaker removed'),
-        backgroundColor: Colors.green.shade600,
-        behavior: SnackBarBehavior.floating,
-        action: SnackBarAction(
-          label: 'Dismiss',
-          textColor: Colors.white,
-          onPressed: () {},
+    final endpoint = Uri.parse(ApiConstants.deleteSpeaker);
+
+    try {
+      final response1 = await _postMultipartAndFollow(endpoint, {
+        'name': s.name,
+        'email': _email,
+      });
+
+      if (response1.statusCode == 200) {
+        final data = jsonDecode(response1.body) as Map<String, dynamic>;
+        final serverMessage =
+            data['message']?.toString() ?? 'Speaker deleted successfully';
+
+        setState(() {
+          _speakers.removeWhere((element) => element.id == s.id);
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(serverMessage),
+            backgroundColor: Colors.green.shade600,
+            behavior: SnackBarBehavior.floating,
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+        return;
+      }
+
+      if (response1.statusCode == 422) {
+        final response2 = await _postMultipartAndFollow(endpoint, {
+          'name': s.name,
+          'phone_number': widget.phoneNumber,
+        });
+
+        if (response2.statusCode == 200) {
+          final data = jsonDecode(response2.body) as Map<String, dynamic>;
+          final serverMessage =
+              data['message']?.toString() ?? 'Speaker deleted successfully';
+
+          setState(() {
+            _speakers.removeWhere((element) => element.id == s.id);
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(serverMessage),
+              backgroundColor: Colors.green.shade600,
+              behavior: SnackBarBehavior.floating,
+              action: SnackBarAction(
+                label: 'Dismiss',
+                textColor: Colors.white,
+                onPressed: () {},
+              ),
+            ),
+          );
+          return;
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Delete failed: ${response1.statusCode}'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'Dismiss',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          action: SnackBarAction(
+            label: 'Dismiss',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
+        ),
+      );
+    }
   }
 
   void _confirmDelete(BuildContext ctx, Speaker s) {
@@ -438,19 +508,11 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                 backgroundColor: widget.isDarkMode ? Colors.grey[900]! : Colors.white,
                 edgeOffset: 20,
                 child: _speakers.isEmpty
-                    ? ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        children: [
-                          SizedBox(
-                            height: MediaQuery.of(context).size.height * 0.6,
-                            child: _NoSpeakersWidget(
-                              isDarkMode: widget.isDarkMode,
-                              phoneNumber: widget.phoneNumber,
-                              onAdd: _goToAddSpeaker,
-                            ),
-                          ),
-                        ],
-                      )
+                    ? _NoSpeakersWidget(
+                  isDarkMode: widget.isDarkMode,
+                  phoneNumber: widget.phoneNumber,
+                  onAdd: _goToAddSpeaker,
+                )
                     : ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(top: 12, left: 18, right: 18, bottom: 40),
@@ -458,13 +520,11 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                   itemBuilder: (_, i) {
                     final s = _speakers[i];
                     final avatarColors = _avatarGradients[i % _avatarGradients.length];
-                    final double start = (0.05 * i).clamp(0.0, 0.95);
-                    final double end = (start + 0.35).clamp(start, 1.0);
                     final anim = Tween<Offset>(
-                            begin: Offset(0, 0.16 * (i + 1)), end: Offset.zero)
+                        begin: Offset(0, 0.16 * (i + 1)), end: Offset.zero)
                         .animate(CurvedAnimation(
                       parent: _listAnimController,
-                      curve: Interval(start, end, curve: Curves.easeOut),
+                      curve: Interval(0.05 * i, 0.4 + 0.10 * i, curve: Curves.easeOut),
                     ));
                     return SlideTransition(
                       position: anim,
