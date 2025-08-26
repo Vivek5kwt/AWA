@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:awa/config/local_extension.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
@@ -69,11 +68,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   bool _showScrollDownBtn = false;
   bool _shouldAutoscroll = true;
 
-  late final FirebaseFirestore _firestore;
-  late String _meetingDocId;
-  bool _savingHistory = false;
-
   String _latestSentence = '';
+  String _latestSpeaker = '';
   Timer? _latestSentenceTimer;
 
   @override
@@ -93,30 +89,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _scrollController = ScrollController();
     _scrollController.addListener(_handleScroll);
 
-    _firestore = FirebaseFirestore.instance;
-    _meetingDocId = "meeting_${DateTime.now().millisecondsSinceEpoch}";
-    _loadPreviousMessages();
     _speakerService.init();
-  }
-
-  Future<void> _loadPreviousMessages() async {
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('email') ?? '';
-    final doc = await _firestore
-        .collection('meeting_histories')
-        .doc('user_$email')
-        .collection('meetings')
-        .doc(_meetingDocId)
-        .get();
-    if (doc.exists) {
-      final data = doc.data()!;
-      setState(() {
-        _messages.clear();
-        _messages
-            .addAll(List<Map<String, dynamic>>.from(data['messages'] ?? []));
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-    }
   }
 
   void _handleScroll() {
@@ -241,6 +214,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       setState(() {
         _currentText = result.recognizedWords;
         _latestSentence = _currentText;
+        _latestSpeaker = '';
       });
       _latestSentenceTimer?.cancel();
     });
@@ -299,13 +273,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
               'spoken': false,
             });
             _latestSentence = text;
+            _latestSpeaker = id ?? 'Unknown';
             _currentText = '';
           });
           _latestSentenceTimer?.cancel();
           _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-            if (mounted) setState(() => _latestSentence = '');
+            if (mounted) {
+              setState(() {
+                _latestSentence = '';
+                _latestSpeaker = '';
+              });
+            }
           });
-          await _saveCurrentMeetingToFirestore();
           if (_shouldAutoscroll) _scrollToBottom(animate: true);
         }
       }
@@ -474,15 +453,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       });
       _textController.clear();
       _latestSentence = msg;
+      _latestSpeaker = _myName;
       _latestSentenceTimer?.cancel();
       _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
         setState(() {
           _latestSentence = '';
+          _latestSpeaker = '';
         });
       });
     });
 
-    await _saveCurrentMeetingToFirestore();
     await Future.delayed(const Duration(milliseconds: 120));
     if (_speakOnMeeting) {
       await _speakMyLastMessage(msg);
@@ -512,28 +492,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     }
   }
 
-  Future<void> _saveCurrentMeetingToFirestore() async {
-    if (_savingHistory) return;
-    _savingHistory = true;
-    final prefs = await SharedPreferences.getInstance();
-    final email = prefs.getString('email') ?? '';
-    final userDoc = _firestore
-        .collection('meeting_histories')
-        .doc('user_$email')
-        .collection('meetings')
-        .doc(_meetingDocId);
-
-    await userDoc.set({
-      'title': 'Group Chat',
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-      'messages': _messages.map((m) {
-        final copy = Map<String, dynamic>.from(m);
-        copy.remove('color');
-        return copy;
-      }).toList(),
-    });
-    _savingHistory = false;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -596,67 +554,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
           ),
         ),
         actions: [
-          Tooltip(
-            message: "Chat History",
-            verticalOffset: 30,
-            child: Container(
-              margin: const EdgeInsets.only(right: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                gradient: LinearGradient(
-                  colors: widget.isDarkMode
-                      ? [
-                    Colors.cyanAccent.withOpacity(0.14),
-                    Colors.blueAccent.withOpacity(0.13)
-                  ]
-                      : [
-                    Colors.deepPurpleAccent.withOpacity(0.11),
-                    Colors.amber.withOpacity(0.14)
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: widget.isDarkMode
-                        ? Colors.cyanAccent.withOpacity(0.13)
-                        : Colors.deepPurpleAccent.withOpacity(0.07),
-                    blurRadius: 10,
-                    offset: Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: IconButton(
-                icon: Icon(
-                  Icons.history_edu_rounded,
-                  color: widget.isDarkMode
-                      ? Colors.cyanAccent
-                      : Colors.deepPurpleAccent,
-                  size: 27,
-                  shadows: [
-                    Shadow(
-                      color: widget.isDarkMode
-                          ? Colors.cyanAccent.withOpacity(0.22)
-                          : Colors.deepPurpleAccent.withOpacity(0.11),
-                      blurRadius: 9,
-                    ),
-                  ],
-                ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MeetingHistoryScreen(
-                        isDark: widget.isDarkMode,
-                        userColors: _userColors,
-                      ),
-                    ),
-                  );
-                },
-                splashRadius: 26,
-              ),
-            ),
-          ),
           Tooltip(
             message: 'Language',
             verticalOffset: 30,
@@ -1038,7 +935,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      _latestSentence,
+                      _latestSpeaker.isNotEmpty
+                          ? '$_latestSpeaker: $_latestSentence'
+                          : _latestSentence,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: Colors.white,
@@ -1257,522 +1156,3 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 }
 
-class MeetingHistoryScreen extends StatelessWidget {
-  final bool isDark;
-  final List<Color> userColors;
-
-  const MeetingHistoryScreen(
-      {Key? key, required this.isDark, required this.userColors})
-      : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final firestore = FirebaseFirestore.instance;
-    final bgColors = isDark
-        ? [
-      const Color(0xFF232526),
-      const Color(0xFF181A20),
-      const Color(0xFF232526)
-    ]
-        : [
-      const Color(0xFF0093E9),
-      const Color(0xFF80D0C7),
-      const Color(0xFFFCF6BA)
-    ];
-
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-        iconTheme: IconThemeData(
-            color: isDark ? Colors.cyanAccent : Colors.deepPurpleAccent),
-        title: ShaderMask(
-          shaderCallback: (rect) => LinearGradient(
-            colors: isDark
-                ? [Colors.cyanAccent, Colors.blueAccent, Colors.white]
-                : [Colors.deepPurple, Colors.indigo, Colors.amber],
-          ).createShader(rect),
-          child: Text(
-            context.loc.chatHistory,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 22,
-              letterSpacing: 1.2,
-              shadows: [
-                Shadow(
-                  color: Colors.black.withOpacity(0.14),
-                  blurRadius: 6,
-                  offset: const Offset(1, 2),
-                ),
-              ],
-            ),
-          ),
-        ),
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 10),
-          child: CircleAvatar(
-            backgroundColor: isDark
-                ? Colors.white.withOpacity(0.09)
-                : Colors.blue.shade50.withOpacity(0.9),
-            child: IconButton(
-              icon: Icon(Icons.arrow_back,
-                  color: isDark ? Colors.white : Colors.black),
-              onPressed: () {
-                context.pop();
-              },
-            ),
-          ),
-        ),
-      ),
-      body: Stack(
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: bgColors,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-          ),
-          if (!isDark)
-            BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                color: Colors.white.withOpacity(0.08),
-              ),
-            ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: FutureBuilder<SharedPreferences>(
-                future: SharedPreferences.getInstance(),
-                builder: (context, prefsSnapshot) {
-                  if (!prefsSnapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final email = prefsSnapshot.data!.getString('email') ?? '';
-                  final meetingsRef = firestore
-                      .collection('meeting_histories')
-                      .doc('user_$email')
-                      .collection('meetings')
-                      .orderBy('timestamp', descending: true);
-
-                  return StreamBuilder<QuerySnapshot>(
-                    stream: meetingsRef.snapshots(),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData)
-                        return const Center(child: CircularProgressIndicator());
-                      final docs = snapshot.data!.docs;
-                      if (docs.isEmpty) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.forum_rounded,
-                                  color: isDark
-                                      ? Colors.cyanAccent
-                                      : Colors.deepPurpleAccent,
-                                  size: 66),
-                              const SizedBox(height: 10),
-                              ShaderMask(
-                                shaderCallback: (rect) => LinearGradient(
-                                  colors: isDark
-                                      ? [Colors.cyanAccent, Colors.white]
-                                      : [Colors.deepPurple, Colors.amber],
-                                ).createShader(rect),
-                                child: Text(
-                                  "No meetings yet.\nLet's talk!",
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 20,
-                                      letterSpacing: 0.3),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      return ListView.separated(
-                        itemCount: docs.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 18),
-                        itemBuilder: (_, i) {
-                          final data = docs[i].data() as Map<String, dynamic>;
-                          final messages = List<Map<String, dynamic>>.from(
-                              data['messages'] ?? []);
-                          final dt = DateTime.fromMillisecondsSinceEpoch(
-                              data['timestamp'] ?? 0);
-
-                          return AnimatedContainer(
-                            duration: Duration(milliseconds: 320 + (i * 25)),
-                            curve: Curves.easeInOut,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: BackdropFilter(
-                                filter:
-                                ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                                child: Card(
-                                  color: isDark
-                                      ? Colors.white.withOpacity(0.06)
-                                      : Colors.white.withOpacity(0.83),
-                                  elevation: 8,
-                                  shadowColor: isDark
-                                      ? Colors.cyanAccent.withOpacity(0.11)
-                                      : Colors.amber.withOpacity(0.13),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                      side: BorderSide(
-                                        width: 1.5,
-                                        color: isDark
-                                            ? Colors.cyanAccent
-                                            .withOpacity(0.12)
-                                            : Colors.deepPurpleAccent
-                                            .withOpacity(0.09),
-                                      )),
-                                  child: Theme(
-                                    data: Theme.of(context).copyWith(
-                                      dividerColor: Colors.transparent,
-                                      splashColor:
-                                      Colors.amber.withOpacity(0.09),
-                                    ),
-                                    child: ExpansionTile(
-                                      initiallyExpanded: i == 0,
-                                      collapsedBackgroundColor:
-                                      Colors.transparent,
-                                      backgroundColor: Colors.transparent,
-                                      title: ShaderMask(
-                                        shaderCallback: (rect) =>
-                                            LinearGradient(
-                                              colors: isDark
-                                                  ? [
-                                                Colors.cyanAccent,
-                                                Colors.white
-                                              ]
-                                                  : [
-                                                Colors.deepPurple,
-                                                Colors.indigo,
-                                                Colors.amber
-                                              ],
-                                            ).createShader(rect),
-                                        child: Text(
-                                          data['title'] ??
-                                              context.loc.groupChat,
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 18,
-                                            letterSpacing: 0.6,
-                                            shadows: [
-                                              Shadow(
-                                                  color: isDark
-                                                      ? Colors.cyanAccent
-                                                      .withOpacity(0.16)
-                                                      : Colors.deepPurpleAccent
-                                                      .withOpacity(0.15),
-                                                  blurRadius: 7,
-                                                  offset: Offset(1, 2))
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                      subtitle: Row(
-                                        children: [
-                                          Icon(Icons.calendar_today,
-                                              size: 16,
-                                              color: isDark
-                                                  ? Colors.white60
-                                                  : Colors.blueGrey),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} @ "
-                                                "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}",
-                                            style: TextStyle(
-                                              color: isDark
-                                                  ? Colors.white60
-                                                  : Colors.blueGrey,
-                                              fontSize: 14.5,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                              bottom: 13,
-                                              left: 12,
-                                              right: 12,
-                                              top: 3),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                            children: [
-                                              Padding(
-                                                padding:
-                                                const EdgeInsets.symmetric(
-                                                    vertical: 3),
-                                                child: ShaderMask(
-                                                  shaderCallback: (rect) =>
-                                                      LinearGradient(
-                                                        colors: isDark
-                                                            ? [
-                                                          Colors.cyanAccent,
-                                                          Colors.white
-                                                        ]
-                                                            : [
-                                                          Colors.deepPurple,
-                                                          Colors.amber
-                                                        ],
-                                                      ).createShader(rect),
-                                                  child: Text(
-                                                    context.loc.conversation,
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight:
-                                                      FontWeight.bold,
-                                                      fontSize: 15.8,
-                                                      letterSpacing: 0.5,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              ...messages
-                                                  .asMap()
-                                                  .entries
-                                                  .map((entry) {
-                                                final msg = entry.value;
-                                                final isMe =
-                                                    msg['isMe'] ?? false;
-                                                final color = isMe
-                                                    ? (isDark
-                                                    ? Colors.cyanAccent
-                                                    : Colors
-                                                    .deepPurpleAccent)
-                                                    : userColors[entry.key %
-                                                    userColors.length];
-                                                return Padding(
-                                                  padding: const EdgeInsets
-                                                      .symmetric(vertical: 6),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                    CrossAxisAlignment
-                                                        .start,
-                                                    children: [
-                                                      Container(
-                                                        decoration:
-                                                        BoxDecoration(
-                                                          gradient:
-                                                          LinearGradient(
-                                                            colors: [
-                                                              color.withOpacity(
-                                                                  0.82),
-                                                              color.withOpacity(
-                                                                  0.66)
-                                                            ],
-                                                            begin: Alignment
-                                                                .topLeft,
-                                                            end: Alignment
-                                                                .bottomRight,
-                                                          ),
-                                                          borderRadius:
-                                                          BorderRadius
-                                                              .circular(50),
-                                                        ),
-                                                        child: CircleAvatar(
-                                                          backgroundColor:
-                                                          Colors
-                                                              .transparent,
-                                                          radius: 16,
-                                                          child: Text(
-                                                            (msg['user'] as String?)
-                                                                ?.isNotEmpty ==
-                                                                true
-                                                                ? (msg['user']
-                                                            as String)[0]
-                                                                .toUpperCase()
-                                                                : "?",
-                                                            style: const TextStyle(
-                                                                color: Colors
-                                                                    .white,
-                                                                fontWeight:
-                                                                FontWeight
-                                                                    .bold,
-                                                                fontSize: 17),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 10),
-                                                      Expanded(
-                                                        child:
-                                                        AnimatedContainer(
-                                                          duration:
-                                                          const Duration(
-                                                              milliseconds:
-                                                              340),
-                                                          padding:
-                                                          const EdgeInsets
-                                                              .symmetric(
-                                                              vertical: 10,
-                                                              horizontal:
-                                                              13),
-                                                          decoration:
-                                                          BoxDecoration(
-                                                            color: color
-                                                                .withOpacity(
-                                                                isMe
-                                                                    ? 0.19
-                                                                    : 0.16),
-                                                            borderRadius:
-                                                            BorderRadius
-                                                                .circular(
-                                                                15),
-                                                            border: Border.all(
-                                                              color: color
-                                                                  .withOpacity(
-                                                                  0.22),
-                                                              width: 1.1,
-                                                            ),
-                                                            boxShadow: [
-                                                              BoxShadow(
-                                                                color: color
-                                                                    .withOpacity(
-                                                                    0.08),
-                                                                blurRadius: 8,
-                                                                offset: Offset(
-                                                                    0, 3),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                          child: Column(
-                                                            crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                            children: [
-                                                              Row(
-                                                                children: [
-                                                                  Text(
-                                                                    msg['user'] ??
-                                                                        '',
-                                                                    style:
-                                                                    TextStyle(
-                                                                      fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                      color:
-                                                                      color,
-                                                                      fontSize:
-                                                                      14.5,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                      width: 6),
-                                                                  if (isMe)
-                                                                    Container(
-                                                                      decoration:
-                                                                      BoxDecoration(
-                                                                        color: Colors
-                                                                            .amber
-                                                                            .withOpacity(0.12),
-                                                                        borderRadius:
-                                                                        BorderRadius.circular(9),
-                                                                      ),
-                                                                      padding: EdgeInsets.symmetric(
-                                                                          horizontal:
-                                                                          6,
-                                                                          vertical:
-                                                                          2),
-                                                                      child:
-                                                                      Row(
-                                                                        children: [
-                                                                          Icon(
-                                                                              Icons.verified,
-                                                                              size: 14,
-                                                                              color: Colors.amber),
-                                                                          SizedBox(
-                                                                              width: 2),
-                                                                          Text(
-                                                                              "You",
-                                                                              style: TextStyle(color: Colors.amber, fontWeight: FontWeight.w700, fontSize: 11)),
-                                                                        ],
-                                                                      ),
-                                                                    ),
-                                                                ],
-                                                              ),
-                                                              const SizedBox(
-                                                                  height: 3),
-                                                              Text(
-                                                                msg['text'] ??
-                                                                    '',
-                                                                style:
-                                                                TextStyle(
-                                                                  color: isDark
-                                                                      ? Colors
-                                                                      .white
-                                                                      .withOpacity(
-                                                                      0.92)
-                                                                      : Colors
-                                                                      .black87,
-                                                                  fontSize:
-                                                                  15.1,
-                                                                  height: 1.26,
-                                                                ),
-                                                              ),
-                                                              const SizedBox(
-                                                                  height: 4),
-                                                              Align(
-                                                                alignment: Alignment
-                                                                    .bottomRight,
-                                                                child: Text(
-                                                                  msg['time'] ??
-                                                                      '',
-                                                                  style:
-                                                                  TextStyle(
-                                                                    color: isDark
-                                                                        ? Colors
-                                                                        .white54
-                                                                        : Colors
-                                                                        .blueGrey,
-                                                                    fontSize:
-                                                                    12,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                );
-                                              }),
-                                            ],
-                                          ),
-                                        )
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
