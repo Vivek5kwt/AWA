@@ -1,20 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
-import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:wave_blob/wave_blob.dart';
-import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+
+import '../../../../core/speaker/speaker_service.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
@@ -60,9 +59,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _speakOnMeeting = true;
   bool _showTextMyLanguage = false;
 
-  final List<_AudioQueueItem> _audioQueue = [];
-  bool _isApiProcessing = false;
-  int _audioLabel = 0;
+  final SpeakerService _speakerService = SpeakerService();
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  String _currentText = '';
 
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
@@ -74,8 +73,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   String _latestSentence = '';
   Timer? _latestSentenceTimer;
-  Timer? _silenceTimer;
-  final Duration _silenceDuration = const Duration(minutes: 2);
 
   @override
   void initState() {
@@ -97,6 +94,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _firestore = FirebaseFirestore.instance;
     _meetingDocId = "meeting_${DateTime.now().millisecondsSinceEpoch}";
     _loadPreviousMessages();
+    _speakerService.init();
   }
 
   Future<void> _loadPreviousMessages() async {
@@ -138,11 +136,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   void dispose() {
     _amplitudeTimer?.cancel();
     _latestSentenceTimer?.cancel();
-    _silenceTimer?.cancel();
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
     _scrollController.dispose();
+    _speech.stop();
+    _speakerService.dispose();
     super.dispose();
   }
 
@@ -213,7 +212,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = true;
       _speakerIndex = 0;
     });
-    _resetSilenceTimer();
 
     _amplitudeTimer?.cancel();
     _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 48), (_) {
@@ -234,50 +232,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       path: _currentFilePath!,
     );
 
-
-
-    _continueRecordingCycle();
-  }
-
-  Future<void> _continueRecordingCycle() async {
-    while (_isRecording) {
-      await Future.delayed(const Duration(seconds: 5));
-      if (!_isRecording) break;
-
-      final String? stoppedPath = await _recorder.stop();
-      if (stoppedPath != null) {
-        final File audioFile = File(stoppedPath);
-        final label = _audioLabel++;
-        bool shouldSend = await _isAudioSignificant(audioFile);
-        if (shouldSend) {
-          _resetSilenceTimer();
-          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
-          _processAudioQueue();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text("No voice detected, try again!"),
-              backgroundColor: Colors.orange.shade400,
-              duration: const Duration(milliseconds: 900),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-
-      if (!_isRecording) break;
-
-      _currentFilePath = _generateTempFilePath();
-      await _recorder.start(
-        RecordConfig(
-          encoder: AudioEncoder.wav,
-          bitRate: 256000,
-          sampleRate: 44100,
-          numChannels: 1,
-        ),
-        path: _currentFilePath!,
-      );
-    }
+    _currentText = '';
+    _speech.listen(onResult: (result) {
+      if (!mounted) return;
+      setState(() {
+        _currentText = result.recognizedWords;
+        _latestSentence = _currentText;
+      });
+      _latestSentenceTimer?.cancel();
+    });
   }
 
   Future<bool> _isAudioSignificant(File file) async {
@@ -305,8 +268,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _isRecording = false;
       _amplitude = 0;
     });
-    _silenceTimer?.cancel();
     _amplitudeTimer?.cancel();
+    await _speech.stop();
 
     String? stoppedPath;
     if (await _recorder.isRecording()) {
@@ -317,31 +280,39 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
     if (stoppedPath != null) {
       final file = File(stoppedPath);
-      if (await file.exists()) {
-        int durationSec = await _getWavDurationSeconds(file);
-        if (durationSec <= 19 && durationSec >= 1) {
-          final label = _audioLabel++;
-          bool shouldSend = await _isAudioSignificant(file);
-          if (shouldSend) {
-            _resetSilenceTimer();
-            _audioQueue.add(_AudioQueueItem(file: file, label: label));
-            _processAudioQueue();
-          }
+      if (await file.exists() && await _isAudioSignificant(file)) {
+        String? id;
+        try {
+          id = await _speakerService.identify(stoppedPath);
+        } catch (_) {}
+        final text = _currentText.trim();
+        if (text.isNotEmpty) {
+          setState(() {
+            _messages.add({
+              'user': id ?? 'Unknown',
+              'text': text,
+              'time': TimeOfDay.now().format(context),
+              'isMe': false,
+              'spoken': false,
+            });
+            _latestSentence = text;
+            _currentText = '';
+          });
+          _latestSentenceTimer?.cancel();
+          _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+            if (mounted) setState(() => _latestSentence = '');
+          });
+          await _saveCurrentMeetingToFirestore();
+          if (_shouldAutoscroll) _scrollToBottom(animate: true);
         }
       }
     }
   }
-  Future<int> _getWavDurationSeconds(File file) async {
-    try {
-      final bytes = await file.readAsBytes();
-      if (bytes.length < 44) return 0;
-      final byteRate = bytes.buffer.asByteData().getUint32(28, Endian.little);
-      final dataLen = bytes.length - 44;
-      if (byteRate > 0) return (dataLen ~/ byteRate).clamp(0, 1000);
-    } catch (_) {}
-    return 0;
-  }
 
+  // Aliases matching speaker screen controls
+  Future<void> _startRecording() => _startListening();
+
+  Future<void> _stopAndIdentify() => _stopListening();
 
   // Allow English and major Indian scripts so that Hindi or other
   // Indian languages are not filtered out when app language is English.
@@ -362,38 +333,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return true;
   }
 
-  void _resetSilenceTimer() {
-    _silenceTimer?.cancel();
-    _silenceTimer = Timer(_silenceDuration, _handleSilenceTimeout);
-  }
-
-  void _handleSilenceTimeout() {
-    if (!_isRecording) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('No voice detected'),
-        content: const Text(
-            'No voice detected for a while. Stop the conversation? You can start again when your meeting begins. Your meeting is saved.'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _stopListening();
-            },
-            child: const Text('Stop'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              _resetSilenceTimer();
-            },
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _scrollToBottom({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -407,26 +346,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
   }
 
-  void _processAudioQueue() async {
-    if (_isApiProcessing || _audioQueue.isEmpty) return;
-    _isApiProcessing = true;
-    while (_audioQueue.isNotEmpty) {
-      final item = _audioQueue.removeAt(0);
-      await _hitIdentifySpeaker(item.file, item.label);
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
-    _isApiProcessing = false;
-  }
+  void _processAudioQueue() async {}
 
-  Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedEmail = prefs.getString('email') ?? '';
-
-    final base = _showTextMyLanguage
-        ? ApiConstants.identifySpeakerNative
-        : ApiConstants.identifySpeaker;
-    Uri uri = Uri.parse('$base?email=$storedEmail&label=$label');
-    void showAccountDeletedDialog() {
+  Future<void> _hitIdentifySpeaker(File audioFile, int label) async {}
       showGeneralDialog(
         context: context,
         barrierDismissible: false,
@@ -535,110 +457,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         ),
       );
     }
-    Future<http.StreamedResponse> sendRequest(Uri targetUri) {
-      final request = http.MultipartRequest('POST', targetUri)
-        ..files.add(
-          http.MultipartFile.fromBytes(
-            'audio_file',
-            audioFile.readAsBytesSync(),
-            filename: audioFile.path.split('/').last,
-            contentType: MediaType('audio', 'wav'),
-          ),
-        );
-      return request.send();
-    }
-
-    try {
-      http.StreamedResponse streamed = await sendRequest(uri);
-      http.Response response = await http.Response.fromStream(streamed);
-
-      if (response.statusCode == 307 || response.statusCode == 302) {
-        final location = streamed.headers['location'];
-        if (location != null) {
-          uri = Uri.parse(location);
-          streamed = await sendRequest(uri);
-          response = await http.Response.fromStream(streamed);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Redirect without Location header'),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-          return;
-        }
-      }
-      if (response.statusCode == 204) {
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (mounted) showAccountDeletedDialog();
-        setState(() {
-        });
-        return;
-      }
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        final speakers = body['speakers'] as List<dynamic>;
-
-        setState(() {
-          for (var speakerEntry in speakers) {
-            final key = (speakerEntry as Map<String, dynamic>).keys.first;
-            final data = speakerEntry[key] as Map<String, dynamic>;
-            final name = data['name'] as String? ?? 'Unknown';
-            final text = data['spoken_text'] as String? ?? '';
-            final time = TimeOfDay.now().format(context);
-
-            if (text.trim().isEmpty) {
-              continue;
-            }
-            if (!_showTextMyLanguage &&
-                !_isTextInLanguage(text, _appLanguageCode)) {
-              continue;
-            }
-
-            _messages.add({
-              'user': name,
-              'text': text,
-              'time': time,
-              'isMe': false,
-              'spoken': false,
-              'audioLabel': label,
-            });
-            _latestSentence = text;
-            _latestSentenceTimer?.cancel();
-            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-              setState(() {
-                _latestSentence = '';
-              });
-            });
-            _speakerIndex++;
-          }
-        });
-
-        await _saveCurrentMeetingToFirestore();
-        if (_shouldAutoscroll) _scrollToBottom(animate: true);
-      } else {
-        final errorBody = response.body.isNotEmpty
-            ? response.body
-            : 'No error message from API';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('API error ${response.statusCode}: $errorBody'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to call API: $e'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
   Future<void> _sendTextMessage() async {
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
@@ -1272,9 +1090,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                             child: GestureDetector(
                               onTap: () {
                                 if (_isRecording) {
-                                  _stopListening();
+                                  _stopAndIdentify();
                                 } else {
-                                  _startListening();
+                                  _startRecording();
                                   _micGlowController.forward(from: 0.97);
                                 }
                               },
@@ -1331,11 +1149,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 }
 
-class _AudioQueueItem {
-  final File file;
-  final int label;
-  _AudioQueueItem({required this.file, required this.label});
-}
 
 
 class MeetingHistoryScreen extends StatelessWidget {
