@@ -331,6 +331,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       }
     }
   }
+
+  // Aliases matching speaker screen controls
+  Future<void> _startRecording() => _startListening();
+
+  Future<void> _stopAndIdentify() => _stopListening();
+
   Future<int> _getWavDurationSeconds(File file) async {
     try {
       final bytes = await file.readAsBytes();
@@ -1272,9 +1278,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                             child: GestureDetector(
                               onTap: () {
                                 if (_isRecording) {
-                                  _stopListening();
+                                  _stopAndIdentify();
                                 } else {
-                                  _startListening();
+                                  _startRecording();
                                   _micGlowController.forward(from: 0.97);
                                 }
                               },
