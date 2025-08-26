@@ -271,221 +271,47 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
             onPressed: totalUsers == 0
                 ? null
                 : () async {
-              final yes = await _confirm(context, 'Clear all enrolled users?');
-              if (yes == true) {
-                await _service.clearAll();
-                await _refreshRegisteredList();
-                setState(() {
-                  _identifiedId = null;
-                });
-                _toast('All users cleared');
-              }
-            },
+                    final yes =
+                        await _confirm(context, 'Clear all enrolled users?');
+                    if (yes == true) {
+                      await _service.clearAll();
+                      await _refreshRegisteredList();
+                      setState(() {
+                        _identifiedId = null;
+                      });
+                      _toast('All users cleared');
+                    }
+                  },
             icon: const Icon(Icons.delete_sweep),
           ),
         ],
       ),
       backgroundColor: bg,
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: Padding(
           padding: const EdgeInsets.all(16),
-          child: DefaultTextStyle(
-            style: TextStyle(color: textColor),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Text(
-                    _identifiedId == null
-                        ? 'Unknown speaker'
-                        : 'Matched/Enrolled: $_identifiedId',
-                    style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Text(
-                    _service.isFallback
-                        ? 'Mode: Fallback (local)'
-                        : 'Mode: ONNX model',
-                    style: TextStyle(color: textColor.withOpacity(0.7)),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                ElevatedButton(
-                  onPressed:
-                  _guidedActive ? null : (_isRecording ? _stopAndIdentify : _startRecording),
-                  child: Text(_isRecording ? 'Stop & Identify' : 'Record to Identify'),
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Text(
-                    _isRecording
-                        ? (_guidedActive ? 'Recording (guided)…' : 'Recording…')
-                        : (_guidedActive ? 'Guided enrollment active' : 'Idle'),
-                    style: TextStyle(color: textColor.withOpacity(0.7)),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-                const Divider(),
-
-                Card(
-                  color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
-                  elevation: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.school),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Guided Enrollment',
-                              style: TextStyle(
-                                color: textColor,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (_guidedActive)
-                              TextButton.icon(
-                                onPressed: _isRecording ? null : _cancelGuidedEnrollment,
-                                icon: const Icon(Icons.close),
-                                label: const Text('Cancel'),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (!_guidedActive) ...[
-                          Text(
-                            'Read 5 short phrases to create a robust voice print.',
-                            style: TextStyle(color: textColor.withOpacity(0.85)),
-                          ),
-                          const SizedBox(height: 12),
-                          ElevatedButton.icon(
-                            onPressed: _beginGuidedEnrollment,
-                            icon: const Icon(Icons.person_add),
-                            label: const Text('Start Guided Enrollment'),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Phrases:',
-                            style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 6),
-                          for (final p in _prompts)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 2),
-                              child: Text('• $p', style: TextStyle(color: textColor)),
-                            ),
-                        ] else ...[
-                          Text(
-                            'Step ${_promptIndex + 1} of ${_prompts.length}',
-                            style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: textColor.withOpacity(0.2)),
-                            ),
-                            child: Text(
-                              '"${_prompts[_promptIndex]}"',
-                              style: TextStyle(
-                                color: textColor,
-                                fontSize: 16,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: _isRecording ? null : _recordCurrentPrompt,
-                                  icon: const Icon(Icons.mic),
-                                  label: const Text('Start Recording'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: _isRecording ? _stopAndSaveCurrentPrompt : null,
-                                  icon: const Icon(Icons.check),
-                                  label: const Text('Stop & Save'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-                const Divider(),
-
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Registered users (${_registered.length})',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+          child: _registered.isEmpty
+              ? Text(
+                  'No users enrolled yet.',
+                  style: TextStyle(color: textColor.withOpacity(0.8)),
+                )
+              : ListView.separated(
+                  itemCount: _registered.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final name = _registered.keys.elementAt(i);
+                    final count = _registered[name] ?? 0;
+                    return ListTile(
+                      leading: const Icon(Icons.person),
+                      title: Text(name, style: TextStyle(color: textColor)),
+                      subtitle: Text(
+                        '$count sample${count == 1 ? '' : 's'}',
+                        style: TextStyle(color: textColor.withOpacity(0.7)),
                       ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
-                const SizedBox(height: 8),
-
-                if (_registered.isEmpty)
-                  Text(
-                    'No users enrolled yet. Start the guided enrollment above.',
-                    style: TextStyle(color: textColor.withOpacity(0.8)),
-                  )
-                else
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: _registered.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (ctx, i) {
-                      final name = _registered.keys.elementAt(i);
-                      final count = _registered[name] ?? 0;
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.person),
-                        title: Text(name, style: TextStyle(color: textColor)),
-                        subtitle: Text(
-                          '$count sample${count == 1 ? "" : "s"}',
-                          style: TextStyle(color: textColor.withOpacity(0.7)),
-                        ),
-                      );
-                    },
-                  ),
-              ],
-            ),
-          ),
         ),
-      ),
-
-      floatingActionButton: _guidedActive
-          ? null
-          : FloatingActionButton(
-        tooltip: 'Start Guided Enrollment',
-        onPressed: _beginGuidedEnrollment,
-        child: const Icon(Icons.person_add),
       ),
     );
   }
