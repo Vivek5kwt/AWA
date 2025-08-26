@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../../../core/speaker/speaker_service.dart';
 
 /// Identification UI (WAV 16k mono) with guided 5-phrase enrollment.
+/// Automatically falls back to a local heuristic if the ONNX model is absent.
 class SpeakerScreen extends StatefulWidget {
   final String phoneNumber;
   final bool isDarkMode;
@@ -42,6 +43,8 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
   String? _identifiedId;
   Map<String, int> _registered = {};
 
+  static bool _modeToastShown = false;
+
   @override
   void initState() {
     super.initState();
@@ -51,6 +54,17 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
   Future<void> _initAll() async {
     await _service.init();
     await _refreshRegisteredList();
+    if (!mounted) return;
+
+    if (!_modeToastShown) {
+      _modeToastShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _toast(_service.isFallback
+            ? 'Speaker model not found — using local fallback.'
+            : 'High-accuracy speaker model loaded.');
+      });
+    }
   }
 
   Future<void> _refreshRegisteredList() async {
@@ -115,22 +129,26 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
 
   Future<void> _stopAndIdentify() async {
     if (_registered.isEmpty) {
-      _toast('No users enrolled yet. Start guided enrollment first.');
+      _toast('No users enrolled yet in this mode. Please run guided enrollment.');
       return;
     }
     final path = await _stop();
     if (path != null && await File(path).exists()) {
-      final id = await _service.identify(
-        path,
-        threshold: 0.80,
-        secondBestMargin: 0.04,
-      );
-      if (!mounted) return;
-      setState(() => _identifiedId = id);
-      if (id == null) {
-        _toast('No confident match');
-      } else {
-        _toast('Matched: $id');
+      try {
+        final id = await _service.identify(
+          path,
+          threshold: 0.74,
+          secondBestMargin: 0.035,
+        );
+        if (!mounted) return;
+        setState(() => _identifiedId = id);
+        if (id == null) {
+          _toast('No confident match');
+        } else {
+          _toast('Matched: $id');
+        }
+      } catch (e) {
+        _toast(e.toString()); // e.g., "Please speak clearly for at least 1.2 seconds."
       }
     } else {
       _toast('No recording found to identify');
@@ -284,9 +302,17 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
                     style: TextStyle(color: textColor, fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                 ),
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    _service.isFallback
+                        ? 'Mode: Fallback (local)'
+                        : 'Mode: ONNX model',
+                    style: TextStyle(color: textColor.withOpacity(0.7)),
+                  ),
+                ),
                 const SizedBox(height: 16),
 
-                // Identify control
                 ElevatedButton(
                   onPressed:
                   _guidedActive ? null : (_isRecording ? _stopAndIdentify : _startRecording),
@@ -305,7 +331,6 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
                 const SizedBox(height: 24),
                 const Divider(),
 
-                // Guided enrollment card
                 Card(
                   color: widget.isDarkMode ? const Color(0xFF1E1E1E) : Colors.white,
                   elevation: 2,
@@ -408,7 +433,6 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
                 const SizedBox(height: 24),
                 const Divider(),
 
-                // Registered users
                 Row(
                   children: [
                     Expanded(
