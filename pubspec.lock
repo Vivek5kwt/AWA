@@ -1253,6 +1253,54 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.1"
+  sherpa_onnx:
+    dependency: "direct main"
+    description:
+      name: sherpa_onnx
+      sha256: "33fca86eef180ad021a60b3a9afa6debaa2009dc90d0475ea0809ead451c749d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.10"
+  sherpa_onnx_android:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_android
+      sha256: "7407d72c0ee64147b442fc9b7bcf6d4d78fb4693bd41f9e65528a733225d38a7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.10"
+  sherpa_onnx_ios:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_ios
+      sha256: "23871d3c6a9ac4f32468a36a6c0ae44139b83c8932e01b0d6e46b143a01bb1d4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.10"
+  sherpa_onnx_linux:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_linux
+      sha256: "281fbdd1122c990db23232c07b81f3f2103d7d060970a7e0359b5762fb8c4d9b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.10"
+  sherpa_onnx_macos:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_macos
+      sha256: a6ac26fbe712fe234530d130529b9b3385b20fe682c2453b5a71d3022bd37751
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.10"
+  sherpa_onnx_windows:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_windows
+      sha256: "6838b1bd7b17077a748061c413b0f2629f99f0bfe0cb29f82d3dd7f326179f2b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.12.10"
   showcaseview:
     dependency: "direct main"
     description:
