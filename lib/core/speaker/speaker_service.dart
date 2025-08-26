@@ -157,6 +157,7 @@ class SpeakerService {
 
     String? bestId;
     double bestScore = -1.0, secondBest = -1.0;
+    final Map<String, double> _scores = {};
 
     for (final entry in data.entries) {
       final name = entry.key;
@@ -176,6 +177,8 @@ class SpeakerService {
 
       final score = 0.6 * centroidScore + 0.4 * bestSample;
 
+      _scores[name] = score;
+
       if (score > bestScore) {
         secondBest = bestScore;
         bestScore = score;
@@ -183,6 +186,12 @@ class SpeakerService {
       } else if (score > secondBest) {
         secondBest = score;
       }
+    }
+
+    final sorted = _scores.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    for (final e in sorted) {
+      debugPrint('[Identify] ${e.key}: ${(e.value * 100).toStringAsFixed(2)}%');
     }
 
     debugPrint('[Identify] best=$bestScore second=$secondBest (thr=$localThreshold, margin=$localMargin)');
