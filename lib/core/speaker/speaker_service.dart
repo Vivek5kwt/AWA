@@ -128,10 +128,14 @@ class SpeakerService {
   }
 
   /// Identify best match. Returns name or null if not confident.
+  ///
+  /// - [threshold] + [secondBestMargin] = **hard accept** gates
+  /// - [displayThreshold] = **soft display** gate (returns best name even if below hard gates)
   Future<String?> identify(
       String audioPath, {
-        double threshold = 0.74,       // relaxed a bit for ONNX after trimming
-        double secondBestMargin = 0.035,
+        double threshold = 0.74,            // hard accept threshold
+        double secondBestMargin = 0.035,    // hard accept margin
+        double displayThreshold = 0.40,     // <-- soft display threshold (40%)
       }) async {
     final prefs = await SharedPreferences.getInstance();
     var data = _loadEmbeddings(prefs);
@@ -194,11 +198,23 @@ class SpeakerService {
       debugPrint('[Identify] ${e.key}: ${(e.value * 100).toStringAsFixed(2)}%');
     }
 
-    debugPrint('[Identify] best=$bestScore second=$secondBest (thr=$localThreshold, margin=$localMargin)');
+    debugPrint('[Identify] best=${(bestScore*100).toStringAsFixed(2)}% '
+        'second=${(secondBest*100).toStringAsFixed(2)}% '
+        '(hardThr=${(localThreshold*100).toStringAsFixed(0)}%, '
+        'margin=${(localMargin*100).toStringAsFixed(1)}%, '
+        'displayThr=${(displayThreshold*100).toStringAsFixed(0)}%)');
 
+    // Hard accept gate
     if (bestScore >= localThreshold && (bestScore - secondBest) >= localMargin) {
       return bestId;
     }
+
+    // ---- Soft display gate (your requirement): show the top name if >= 40% ----
+    if (bestScore >= displayThreshold) {
+      return bestId; // will let UI show the name even if "not fully confident"
+    }
+
+    // Otherwise, no match
     return null;
   }
 
