@@ -36,6 +36,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   double _amplitude = 0;
   late AnimationController _micGlowController;
   final SpeechToText _speech = SpeechToText();
+  late final Future<bool> _speechInitFuture;
 
   final List<Map<String, dynamic>> _messages = [];
   final TextEditingController _textController = TextEditingController();
@@ -44,6 +45,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   final FlutterTts _flutterTts = FlutterTts();
   final SpeakerService _speakerService = SpeakerService();
+  late final Future<void> _speakerInitFuture;
   final rec.AudioRecorder _recorder = rec.AudioRecorder();
   String? _currentRecordingPath;
 
@@ -72,8 +74,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
-    _speech.initialize(onStatus: _onSpeechStatus, onError: _onSpeechError);
-    unawaited(_speakerService.init());
+    _speechInitFuture =
+        _speech.initialize(onStatus: _onSpeechStatus, onError: _onSpeechError);
+    _speakerInitFuture = _speakerService.init();
     _initUser();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
@@ -257,34 +260,33 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   Future<void> _startListening() async {
-    if (!_speech.isAvailable) {
-      final available = await _speech.initialize(
-        onStatus: _onSpeechStatus,
-        onError: _onSpeechError,
-      );
+    try {
+      final available = await _speechInitFuture;
       if (!available) return;
+      setState(() {
+        _isRecording = true;
+      });
+      await _startRecordingClip();
+      // Always listen in the user's selected app language to support
+      // multilingual speech recognition.
+      final localeId = _localeIdForLanguage(_appLanguageCode);
+      _speech.listen(
+        onResult: _onSpeechResult,
+        listenMode: ListenMode.dictation,
+        localeId: localeId,
+        partialResults: true,
+        listenFor: const Duration(hours: 1),
+        pauseFor: const Duration(seconds: 5),
+        cancelOnError: false,
+        onSoundLevelChange: (level) {
+          setState(() {
+            _amplitude = level * 1000;
+          });
+        },
+      );
+    } catch (e) {
+      debugPrint('[GroupSpeechToText] startListening failed: $e');
     }
-    setState(() {
-      _isRecording = true;
-    });
-    await _startRecordingClip();
-    // Always listen in the user's selected app language to support
-    // multilingual speech recognition.
-    final localeId = _localeIdForLanguage(_appLanguageCode);
-    _speech.listen(
-      onResult: _onSpeechResult,
-      listenMode: ListenMode.dictation,
-      localeId: localeId,
-      partialResults: true,
-      listenFor: const Duration(hours: 1),
-      pauseFor: const Duration(seconds: 5),
-      cancelOnError: false,
-      onSoundLevelChange: (level) {
-        setState(() {
-          _amplitude = level * 1000;
-        });
-      },
-    );
   }
 
   Future<void> _stopListening() async {
@@ -306,11 +308,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
     if (!result.finalResult) return;
     final audioPath = await _stopRecordingClip();
+    await _speech.stop();
     String speaker = _myName;
     if (audioPath != null) {
-      final id = await _speakerService.identify(audioPath);
-      if (id != null && id.isNotEmpty) {
-        speaker = _capitalize(id);
+      try {
+        await _speakerInitFuture;
+        final id = await _speakerService.identify(audioPath);
+        if (id != null && id.isNotEmpty) {
+          speaker = _capitalize(id);
+        }
+      } catch (e) {
+        debugPrint('[GroupSpeechToText] identify failed: $e');
       }
     }
     setState(() {
