@@ -8,7 +8,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Use ONNX if present; otherwise fallback heuristic.
+// ONNX path if present, otherwise we use the heuristic fallback.
 import 'package:sherpa_onnx/sherpa_onnx.dart';
 
 /// Simple WAV container for our parser (16-bit PCM).
@@ -24,27 +24,27 @@ class _Wav {
 class SpeakerService {
   SpeakerService._internal();
   static final SpeakerService _instance = SpeakerService._internal();
-
   factory SpeakerService() => _instance;
 
   static const _assetModelPath =
       'assets/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx';
 
-  SpeakerEmbeddingExtractor? _extractor; // non-null when ONNX model is available
+  SpeakerEmbeddingExtractor? _extractor; // non-null when ONNX available
   String? _modelLocalPath; // copied model path in app storage
-
-  late String _storeKey; // per-mode bucket
+  late String _storeKey; // per-mode bucket (onnx vs fallback)
 
   bool _initialized = false;
 
   bool get isReady => _extractor != null;
   bool get isFallback => _extractor == null;
+  bool get initialized => _initialized;
 
   /// Initialize backend + decide per-mode storage key.
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
 
+    // Initialize sherpa_onnx FFI bindings (no-op if already done)
     try {
       initBindings();
     } catch (_) {}
@@ -59,6 +59,7 @@ class SpeakerService {
       }
     } catch (_) {}
 
+    // Try prepare/copy model and build extractor
     _modelLocalPath = await _copyModelIfAny();
     if (_modelLocalPath != null) {
       try {
@@ -72,7 +73,7 @@ class SpeakerService {
         debugPrint('[SpeakerService] ONNX model loaded: $_modelLocalPath');
       } catch (e) {
         _extractor = null;
-        debugPrint('[SpeakerService] Failed to init ONNX model, falling back: $e');
+        debugPrint('[SpeakerService] Failed to init ONNX model, fallback: $e');
       }
     } else {
       debugPrint('[SpeakerService] No ONNX model in assets; using fallback heuristic.');
@@ -94,6 +95,12 @@ class SpeakerService {
   }
 
   // ---------------- Public API ----------------
+
+  Future<bool> hasEnrollments() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = _loadEmbeddings(prefs);
+    return data.isNotEmpty;
+  }
 
   Future<String> enrollAppend(String name, String audioPath) async {
     final n = name.trim();
@@ -144,30 +151,65 @@ class SpeakerService {
         double secondBestMargin = 0.035,
         double displayThreshold = 0.40,
       }) async {
+    // Use ranked scoring to decide the label
+    final scores = await identifyScores(
+      audioPath,
+      topK: 2,
+      includeBelowThreshold: true,
+    );
+    if (scores.isEmpty) return null;
+
+    final best = scores[0];
+    final bestScore = (best['score'] as num).toDouble();
+    final bestId = best['name'] as String;
+    final secondBest =
+    scores.length > 1 ? (scores[1]['score'] as num).toDouble() : -1.0;
+
+    final localThreshold = isFallback ? max(0.70, threshold - 0.04) : threshold;
+    final localMargin =
+    isFallback ? max(0.03, secondBestMargin - 0.01) : secondBestMargin;
+
+    debugPrint('[Identify] best=${(bestScore * 100).toStringAsFixed(2)}% '
+        'second=${(secondBest * 100).toStringAsFixed(2)}% '
+        '(hardThr=${(localThreshold * 100).toStringAsFixed(0)}%, '
+        'margin=${(localMargin * 100).toStringAsFixed(1)}%, '
+        'displayThr=${(displayThreshold * 100).toStringAsFixed(0)}%)');
+
+    if (bestScore >= localThreshold && (bestScore - secondBest) >= localMargin) {
+      return bestId;
+    }
+    if (bestScore >= displayThreshold) {
+      return bestId;
+    }
+    return null;
+  }
+
+  /// NEW: ranked candidates (name + score in 0..1). If [includeBelowThreshold] is
+  /// false, prunes very low scores (< 0.20).
+  Future<List<Map<String, dynamic>>> identifyScores(
+      String audioPath, {
+        int topK = 5,
+        bool includeBelowThreshold = false,
+      }) async {
     final prefs = await SharedPreferences.getInstance();
     var data = _loadEmbeddings(prefs);
     if (data.isEmpty) {
       debugPrint('[SpeakerService] No enrollments in current mode ($_storeKey).');
-      return null;
+      return [];
     }
-
-    final localThreshold = isFallback ? max(0.70, threshold - 0.04) : threshold;
-    final localMargin = isFallback ? max(0.03, secondBestMargin - 0.01) : secondBestMargin;
 
     final probe = await _extractEmbeddingFromFile(audioPath);
     final probeDim = probe.length;
 
+    // Keep only entries matching current embedding dimension
     data = _filterByDim(data, probeDim);
     if (data.isEmpty) {
       debugPrint(
           '[SpeakerService] Enrollment embeddings do not match dimension $probeDim. Re-enroll in this mode.');
-      return null;
+      return [];
     }
 
-    String? bestId;
-    double bestScore = -1.0, secondBest = -1.0;
-    final Map<String, double> _scores = {};
-
+    final List<Map<String, dynamic>> results = [];
     for (final entry in data.entries) {
       final name = entry.key;
       final list = (entry.value as List)
@@ -185,39 +227,24 @@ class SpeakerService {
       }
 
       final score = 0.6 * centroidScore + 0.4 * bestSample;
-
-      _scores[name] = score;
-
-      if (score > bestScore) {
-        secondBest = bestScore;
-        bestScore = score;
-        bestId = name;
-      } else if (score > secondBest) {
-        secondBest = score;
-      }
+      results.add({'name': name, 'score': score});
     }
 
-    final sorted = _scores.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    for (final e in sorted) {
-      debugPrint('[Identify] ${e.key}: ${(e.value * 100).toStringAsFixed(2)}%');
+    results.sort((a, b) =>
+        (b['score'] as double).compareTo(a['score'] as double));
+
+    // Pretty console readout
+    debugPrint('--- Speaker candidates ---');
+    for (final c in results) {
+      final n = c['name'];
+      final sc = (c['score'] as double).clamp(0.0, 1.0);
+      debugPrint('  $n : ${(sc * 100).toStringAsFixed(1)}%');
     }
 
-    debugPrint('[Identify] best=${(bestScore*100).toStringAsFixed(2)}% '
-        'second=${(secondBest*100).toStringAsFixed(2)}% '
-        '(hardThr=${(localThreshold*100).toStringAsFixed(0)}%, '
-        'margin=${(localMargin*100).toStringAsFixed(1)}%, '
-        'displayThr=${(displayThreshold*100).toStringAsFixed(0)}%)');
-
-    if (bestScore >= localThreshold && (bestScore - secondBest) >= localMargin) {
-      return bestId;
+    if (!includeBelowThreshold) {
+      return results.where((e) => (e['score'] as double) >= 0.20).take(topK).toList();
     }
-
-    if (bestScore >= displayThreshold) {
-      return bestId;
-    }
-
-    return null;
+    return results.take(topK).toList();
   }
 
   Future<List<String>> listRegistered() async {
@@ -245,7 +272,7 @@ class SpeakerService {
     await prefs.remove(_storeKey);
   }
 
-  /// NEW: delete one enrolled speaker by name. Returns true if removed.
+  /// Delete one enrolled speaker by name. Returns true if removed.
   Future<bool> deleteByName(String name) async {
     final prefs = await SharedPreferences.getInstance();
     final data = _loadEmbeddings(prefs);
@@ -344,12 +371,21 @@ class SpeakerService {
         final emb = _extractor!.compute(stream); // Float32List
         return _l2norm(List<double>.from(emb));
       } finally {
-        try { stream.free(); } catch (_) {}
+        try {
+          stream.free();
+        } catch (_) {}
       }
     } else {
-      final wav2 = _Wav(Int16List.fromList(
-        processed.map((v) => (v * 32768.0).clamp(-32768.0, 32767.0).toInt()).toList(),
-      ), targetSr, 1);
+      // Fallback handcrafted embedding (compact, robust-ish)
+      final wav2 = _Wav(
+        Int16List.fromList(
+          processed
+              .map((v) => (v * 32768.0).clamp(-32768.0, 32767.0).toInt())
+              .toList(),
+        ),
+        targetSr,
+        1,
+      );
       return _extractEmbeddingHeuristicFromWav(wav2);
     }
   }
@@ -428,7 +464,7 @@ class SpeakerService {
   /// Trim leading/trailing silence and normalize peak amplitude.
   List<double> _trimSilenceAndNormalize(List<double> x, int sr) {
     final int frame = max(1, (sr * 0.025).round()); // 25 ms
-    final int hop   = max(1, (sr * 0.010).round()); // 10 ms
+    final int hop = max(1, (sr * 0.010).round()); // 10 ms
     final n = x.length;
 
     // Frame RMS
@@ -449,10 +485,16 @@ class SpeakerService {
 
     int first = -1, last = -1;
     for (int i = 0; i < rms.length; i++) {
-      if (rms[i] >= thresh) { first = i; break; }
+      if (rms[i] >= thresh) {
+        first = i;
+        break;
+      }
     }
     for (int i = rms.length - 1; i >= 0; i--) {
-      if (rms[i] >= thresh) { last = i; break; }
+      if (rms[i] >= thresh) {
+        last = i;
+        break;
+      }
     }
     if (first == -1 || last == -1 || last < first) {
       return _normalizePeak(x);
@@ -504,10 +546,13 @@ class SpeakerService {
     double mean = 0.0;
     for (int i = 0; i < n; i++) {
       final v = wav.samples[i] / 32768.0;
-      x[i] = v; mean += v;
+      x[i] = v;
+      mean += v;
     }
     mean /= max(1, n);
-    const a = 0.97; // pre-emphasis
+
+    // pre-emphasis
+    const a = 0.97;
     double prev = 0.0;
     for (int i = 0; i < n; i++) {
       final v = x[i] - mean;
@@ -518,12 +563,13 @@ class SpeakerService {
 
     final int sr = wav.sampleRate;
     final int frame = max(1, (sr * 0.025).round());
-    final int hop   = max(1, (sr * 0.010).round());
+    final int hop = max(1, (sr * 0.010).round());
 
     final rmsAll = <double>[];
     final zcrAll = <double>[];
     final freqs = <double>[200, 400, 800, 1600, 3200, 6000];
-    final bandLogsAll = List<List<double>>.generate(freqs.length, (_) => <double>[]);
+    final bandLogsAll =
+    List<List<double>>.generate(freqs.length, (_) => <double>[]);
 
     for (int start = 0; start + frame <= n; start += hop) {
       double sumSq = 0.0;
@@ -548,6 +594,7 @@ class SpeakerService {
       }
     }
 
+    // pick speechy frames
     List<int> keep = [];
     if (rmsAll.isNotEmpty) {
       final sorted = List<double>.from(rmsAll)..sort();
@@ -567,7 +614,8 @@ class SpeakerService {
     List<double> _pick(List<double> xs) => [for (final i in keep) xs[i]];
     final rms = _pick(rmsAll);
     final zcr = _pick(zcrAll);
-    final bandLogs = List<List<double>>.generate(freqs.length, (j) => _pick(bandLogsAll[j]));
+    final bandLogs =
+    List<List<double>>.generate(freqs.length, (j) => _pick(bandLogsAll[j]));
 
     List<double> _stats(List<double> v) {
       if (v.isEmpty) return [0, 0, 0, 0, 0, 0];
@@ -579,8 +627,8 @@ class SpeakerService {
         varSum += d * d;
       }
       final std = sqrt(varSum / max(1, v.length - 1));
-      double q(double p) =>
-          sorted[(p * (sorted.length - 1)).clamp(0, (sorted.length - 1).toDouble()).round()];
+      double q(double p) => sorted[
+      (p * (sorted.length - 1)).clamp(0, (sorted.length - 1).toDouble()).round()];
       final p25 = q(0.25), p50 = q(0.50), p75 = q(0.75);
       final p05 = q(0.05), p95 = q(0.95);
       final range = p95 - p05;
@@ -588,8 +636,8 @@ class SpeakerService {
     }
 
     final f = <double>[];
-    f.addAll(_stats(rms));  // 6
-    f.addAll(_stats(zcr));  // +6 = 12
+    f.addAll(_stats(rms)); // 6
+    f.addAll(_stats(zcr)); // +6 = 12
     for (final band in bandLogs) {
       final s = _stats(band);
       f.add(s[0]); // mean
@@ -599,7 +647,8 @@ class SpeakerService {
     return _l2norm(f);
   }
 
-  double _goertzelPower(List<double> x, int start, int len, double freq, int sr) {
+  double _goertzelPower(
+      List<double> x, int start, int len, double freq, int sr) {
     if (len <= 0) return 0.0;
     final k = (0.5 + len * freq / sr).floor();
     final omega = 2.0 * pi * k / len;
