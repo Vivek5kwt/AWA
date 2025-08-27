@@ -129,7 +129,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _textController.dispose();
     _flutterTts.stop();
     _recorder.dispose();
-    _speakerService.dispose();
     _scrollController.dispose();
     super.dispose();
   }
