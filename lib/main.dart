@@ -12,6 +12,7 @@ import 'feature/common_widgets/custom_toast.dart';
 import 'core/utils/routing/routes_generator.dart';
 import 'dart:async';
 import 'core/speaker/speaker_service.dart';
+import 'core/asr/asr_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -71,6 +72,7 @@ class _MyAppState extends State<MyApp> {
   late Locale _locale;
   late final StreamSubscription<ConnectivityResult> _connectivitySubscription;
   final SpeakerService _speakerService = SpeakerService();
+  final AsrService _asrService = AsrService();
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
       GlobalKey<ScaffoldMessengerState>();
 
@@ -87,10 +89,18 @@ class _MyAppState extends State<MyApp> {
       }
     });
     _loadSpeakerModel();
+    _loadAsrModel();
   }
 
   Future<void> _loadSpeakerModel() async {
     await _speakerService.init();
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+    });
+  }
+
+  Future<void> _loadAsrModel() async {
+    await _asrService.init();
     if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
     });
@@ -146,6 +156,7 @@ class _MyAppState extends State<MyApp> {
   void dispose() {
     _connectivitySubscription.cancel();
     _speakerService.dispose();
+    _asrService.dispose();
     super.dispose();
   }
 }
