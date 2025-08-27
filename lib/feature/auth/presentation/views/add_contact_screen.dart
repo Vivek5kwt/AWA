@@ -11,13 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/speaker/speaker_service.dart';
+import '../../../../core/asr/asr_service.dart';
 import 'package:ffi/ffi.dart';
-import 'package:sherpa_onnx/sherpa_onnx.dart';
-
-
-
-// ASR (Sherpa-ONNX)
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:sherpa_onnx/sherpa_onnx.dart';
 
 class AddContactScreen extends StatefulWidget {
@@ -76,15 +71,14 @@ class _AddContactScreenState extends State<AddContactScreen>
   static const int ignoreInitialMs = 300;
   static const int maxRecordMs = 5000;
 
-  // ===== ASR Objects =====
-  OfflineRecognizer? _asr; // created in _initASR()
+  // ===== ASR Service =====
+  final AsrService _asrService = AsrService();
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.name);
     _speakerService.init();
-    _initASR(); // <--- IMPORTANT
 
     _loadTutorialFlags();
 
@@ -108,58 +102,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _revealWords();
-  }
-
-  // ===== ASR init: copy assets/asr/* to a readable location and create OfflineRecognizer =====
-  Future<void> _initASR() async {
-    try {
-      final dir = await getApplicationSupportDirectory();
-      final asrDir = Directory('${dir.path}/asr');
-      if (!await asrDir.exists()) {
-        await asrDir.create(recursive: true);
-      }
-
-      Future<String> copy(String asset, String fileName) async {
-        final bytes = await rootBundle.load(asset);
-        final dst = File('${asrDir.path}/$fileName');
-        if (!await dst.exists() || (await dst.length()) != bytes.lengthInBytes) {
-          await dst.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
-        }
-        return dst.path;
-      }
-
-      final encoder = await copy('assets/asr/encoder-epoch-99-avg-1.onnx', 'encoder-epoch-99-avg-1.onnx');
-      final decoder = await copy('assets/asr/decoder-epoch-99-avg-1.onnx', 'decoder-epoch-99-avg-1.onnx');
-      final joiner  = await copy('assets/asr/joiner-epoch-99-avg-1.onnx',  'joiner-epoch-99-avg-1.onnx');
-      final tokens  = await copy('assets/asr/tokens.txt',                  'tokens.txt');
-
-      final cfg = OfflineRecognizerConfig(
-        feat: FeatureConfig(
-          sampleRate: 16000,
-          featureDim: 80,
-        ),
-        model: OfflineModelConfig(
-          transducer: OfflineTransducerModelConfig(
-            encoder: encoder,
-            decoder: decoder,
-            joiner: joiner,
-          ),
-          tokens: tokens,
-          numThreads: 2,
-          provider: 'cpu',
-          debug: false,
-        ),
-        decodingMethod: 'greedy_search',
-        maxActivePaths: 4,
-      );
-
-
-      _asr = OfflineRecognizer(cfg);
-      debugPrint('[ASR] Ready with Conformer EN model.');
-    } catch (e) {
-      debugPrint('[ASR] init failed: $e');
-      _asr = null;
-    }
   }
 
   Future<void> _loadTutorialFlags() async {
@@ -202,9 +144,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     _micPulse.dispose();
     _checkBurst.dispose();
     _nameController?.dispose();
-    try {
-      _asr?.free();
-    } catch (_) {}
     super.dispose();
   }
 
@@ -544,9 +483,10 @@ class _AddContactScreenState extends State<AddContactScreen>
       final gate = await _measureRmsAndDuration(filePath);
       if (gate.durationSec < 0.9 || gate.rms < 0.015) return false;
 
-      if (_asr == null) return false;
+      final recognizer = _asrService.asr;
+      if (recognizer == null) return false;
 
-      final stream = _asr!.createStream();
+      final stream = recognizer.createStream();
       final samples = await _readWavAsFloat32(filePath);
 
       // Feed into recognizer
@@ -556,8 +496,8 @@ class _AddContactScreenState extends State<AddContactScreen>
       );
 
 
-      _asr!.decode(stream);
-      final result = _asr!.getResult(stream);
+      recognizer.decode(stream);
+      final result = recognizer.getResult(stream);
       final text = result.text.toLowerCase().trim();
       stream.free();
 
