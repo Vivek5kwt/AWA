@@ -169,19 +169,29 @@ class SpeakerService {
     final localMargin =
     isFallback ? max(0.03, secondBestMargin - 0.01) : secondBestMargin;
 
-    debugPrint('[Identify] best=${(bestScore * 100).toStringAsFixed(2)}% '
+    debugPrint('[Identify] top=$bestId '
+        '${(bestScore * 100).toStringAsFixed(2)}% '
         'second=${(secondBest * 100).toStringAsFixed(2)}% '
         '(hardThr=${(localThreshold * 100).toStringAsFixed(0)}%, '
         'margin=${(localMargin * 100).toStringAsFixed(1)}%, '
         'displayThr=${(displayThreshold * 100).toStringAsFixed(0)}%)');
 
+    String? result;
     if (bestScore >= localThreshold && (bestScore - secondBest) >= localMargin) {
-      return bestId;
+      result = bestId;
+    } else if (bestScore >= displayThreshold) {
+      result = bestId;
     }
-    if (bestScore >= displayThreshold) {
-      return bestId;
+
+    if (result != null) {
+      debugPrint('[Identify] Recognized ' 
+          '$result @ ${(bestScore * 100).toStringAsFixed(1)}%');
+    } else {
+      debugPrint('[Identify] No confident match '
+          '(top=$bestId @ ${(bestScore * 100).toStringAsFixed(1)}%)');
     }
-    return null;
+
+    return result;
   }
 
   /// NEW: ranked candidates (name + score in 0..1). If [includeBelowThreshold] is
