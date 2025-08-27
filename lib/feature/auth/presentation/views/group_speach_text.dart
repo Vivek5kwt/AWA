@@ -307,12 +307,24 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   void _onSpeechError(SpeechRecognitionError error) {
     if (_isDisposed || !mounted) return;
+
+    // For transient errors (e.g. timeout), don't stop the flow – just retry.
+    if (!error.permanent) {
+      setState(() => _amplitude = 0);
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!_isDisposed && mounted && _isRecording && !_speech.isListening) {
+          _startListening();
+        }
+      });
+      return;
+    }
+
+    // Permanent errors halt listening and inform the user.
     setState(() {
       _isRecording = false;
       _amplitude = 0;
     });
-    _toast(
-        'Speech error: ${error.errorMsg} (${error.permanent ? "permanent" : "recoverable"})');
+    _toast('Speech error: ${error.errorMsg} (permanent)');
   }
 
   Future<void> _startListening() async {
@@ -352,7 +364,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       onSoundLevelChange: (level) {
         if (!mounted || _isDisposed) return;
         setState(() {
-          _amplitude = level * 1000;
+          // Clamp amplitude to avoid oversized UI vibrations.
+          _amplitude = (level * 1000).clamp(0, 120).toDouble();
         });
       },
     );
