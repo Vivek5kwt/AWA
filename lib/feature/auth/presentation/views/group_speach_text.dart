@@ -320,7 +320,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     if (_isDisposed || !mounted) return;
 
     // For transient errors (e.g. timeout), don't stop the flow – just retry.
-    if (!error.permanent) {
+    // Some platforms report `error_speech_timeout` as permanent; treat it as transient
+    // so listening restarts automatically.
+    if (!error.permanent || error.errorMsg == 'error_speech_timeout') {
       setState(() => _amplitude = 0);
       Future.delayed(const Duration(milliseconds: 500), () {
         if (!_isDisposed && mounted && _isRecording && !_speech.isListening) {
