@@ -594,6 +594,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       });
     }
 
+    // Log the final identified speaker and confidence to the terminal so
+    // developers can easily see who was matched for each utterance.
+    final percent = (bestScore * 100).toStringAsFixed(1);
+    if (showName) {
+      print('Identified speaker: $detectedName at $percent%');
+    } else {
+      print('Identified speaker: Anonymous (below threshold)');
+    }
+
     // Persist
     unawaited(_saveCurrentMeetingToFirestore());
 
