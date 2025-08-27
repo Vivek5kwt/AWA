@@ -21,9 +21,6 @@ class _Wav {
 }
 
 /// Offline speaker enrollment + identification with automatic fallback.
-/// - ONNX model (if bundled) -> high accuracy embeddings
-/// - Otherwise robust heuristic (RMS/ZCR + bands + VAD)
-/// Stores multiple samples per user; matches with cosine + margin.
 class SpeakerService {
   SpeakerService._internal();
   static final SpeakerService _instance = SpeakerService._internal();
@@ -141,14 +138,11 @@ class SpeakerService {
   }
 
   /// Identify best match. Returns name or null if not confident.
-  ///
-  /// - [threshold] + [secondBestMargin] = **hard accept** gates
-  /// - [displayThreshold] = **soft display** gate (returns best name even if below hard gates)
   Future<String?> identify(
       String audioPath, {
-        double threshold = 0.74,            // hard accept threshold
-        double secondBestMargin = 0.035,    // hard accept margin
-        double displayThreshold = 0.40,     // <-- soft display threshold (40%)
+        double threshold = 0.74,
+        double secondBestMargin = 0.035,
+        double displayThreshold = 0.40,
       }) async {
     final prefs = await SharedPreferences.getInstance();
     var data = _loadEmbeddings(prefs);
@@ -157,14 +151,12 @@ class SpeakerService {
       return null;
     }
 
-    // Slightly relax if in fallback mode
     final localThreshold = isFallback ? max(0.70, threshold - 0.04) : threshold;
     final localMargin = isFallback ? max(0.03, secondBestMargin - 0.01) : secondBestMargin;
 
     final probe = await _extractEmbeddingFromFile(audioPath);
     final probeDim = probe.length;
 
-    // Only compare against embeddings of same dimension
     data = _filterByDim(data, probeDim);
     if (data.isEmpty) {
       debugPrint(
@@ -217,17 +209,14 @@ class SpeakerService {
         'margin=${(localMargin*100).toStringAsFixed(1)}%, '
         'displayThr=${(displayThreshold*100).toStringAsFixed(0)}%)');
 
-    // Hard accept gate
     if (bestScore >= localThreshold && (bestScore - secondBest) >= localMargin) {
       return bestId;
     }
 
-    // ---- Soft display gate (your requirement): show the top name if >= 40% ----
     if (bestScore >= displayThreshold) {
-      return bestId; // will let UI show the name even if "not fully confident"
+      return bestId;
     }
 
-    // Otherwise, no match
     return null;
   }
 
@@ -254,6 +243,16 @@ class SpeakerService {
   Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_storeKey);
+  }
+
+  /// NEW: delete one enrolled speaker by name. Returns true if removed.
+  Future<bool> deleteByName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = _loadEmbeddings(prefs);
+    if (!data.containsKey(name)) return false;
+    data.remove(name);
+    await prefs.setString(_storeKey, jsonEncode(data));
+    return true;
   }
 
   // ---------------- Internals ----------------
