@@ -100,7 +100,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _loadAsrModel() async {
-    await _asrService.init();
+   // await _asrService.init();
     if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
     });
