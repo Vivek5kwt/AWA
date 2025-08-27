@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +11,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/speaker/speaker_service.dart';
+import 'package:ffi/ffi.dart';
+import 'package:sherpa_onnx/sherpa_onnx.dart';
+
+
+
+// ASR (Sherpa-ONNX)
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:sherpa_onnx/sherpa_onnx.dart';
 
 class AddContactScreen extends StatefulWidget {
   final String name;
@@ -29,13 +38,15 @@ class AddContactScreen extends StatefulWidget {
 
 class _AddContactScreenState extends State<AddContactScreen>
     with TickerProviderStateMixin {
+
   final List<String> _sentences = [
     "hello, how are you?",
-    "What are you doing?",
+    "what are you doing?",
     "having any plans for today?",
     "can you please repeat that",
     "i will call you later."
   ];
+
   int _currentIndex = 0;
   bool _isRecording = false;
   bool _showTryAgain = false;
@@ -65,11 +76,16 @@ class _AddContactScreenState extends State<AddContactScreen>
   static const int ignoreInitialMs = 300;
   static const int maxRecordMs = 5000;
 
+  // ===== ASR Objects =====
+  OfflineRecognizer? _asr; // created in _initASR()
+
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.name);
     _speakerService.init();
+    _initASR(); // <--- IMPORTANT
+
     _loadTutorialFlags();
 
     _micPulse = AnimationController(
@@ -92,6 +108,58 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _revealWords();
+  }
+
+  // ===== ASR init: copy assets/asr/* to a readable location and create OfflineRecognizer =====
+  Future<void> _initASR() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final asrDir = Directory('${dir.path}/asr');
+      if (!await asrDir.exists()) {
+        await asrDir.create(recursive: true);
+      }
+
+      Future<String> copy(String asset, String fileName) async {
+        final bytes = await rootBundle.load(asset);
+        final dst = File('${asrDir.path}/$fileName');
+        if (!await dst.exists() || (await dst.length()) != bytes.lengthInBytes) {
+          await dst.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+        }
+        return dst.path;
+      }
+
+      final encoder = await copy('assets/asr/encoder-epoch-99-avg-1.onnx', 'encoder-epoch-99-avg-1.onnx');
+      final decoder = await copy('assets/asr/decoder-epoch-99-avg-1.onnx', 'decoder-epoch-99-avg-1.onnx');
+      final joiner  = await copy('assets/asr/joiner-epoch-99-avg-1.onnx',  'joiner-epoch-99-avg-1.onnx');
+      final tokens  = await copy('assets/asr/tokens.txt',                  'tokens.txt');
+
+      final cfg = OfflineRecognizerConfig(
+        feat: FeatureConfig(
+          sampleRate: 16000,
+          featureDim: 80,
+        ),
+        model: OfflineModelConfig(
+          transducer: OfflineTransducerModelConfig(
+            encoder: encoder,
+            decoder: decoder,
+            joiner: joiner,
+          ),
+          tokens: tokens,
+          numThreads: 2,
+          provider: 'cpu',
+          debug: false,
+        ),
+        decodingMethod: 'greedy_search',
+        maxActivePaths: 4,
+      );
+
+
+      _asr = OfflineRecognizer(cfg);
+      debugPrint('[ASR] Ready with Conformer EN model.');
+    } catch (e) {
+      debugPrint('[ASR] init failed: $e');
+      _asr = null;
+    }
   }
 
   Future<void> _loadTutorialFlags() async {
@@ -134,6 +202,9 @@ class _AddContactScreenState extends State<AddContactScreen>
     _micPulse.dispose();
     _checkBurst.dispose();
     _nameController?.dispose();
+    try {
+      _asr?.free();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -232,6 +303,7 @@ class _AddContactScreenState extends State<AddContactScreen>
       ),
     );
   }
+
   Future<void> _askForContactName() async {
     _dialogActive = true;
     final isDark = widget.isDarkMode;
@@ -364,7 +436,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                       ),
                       const SizedBox(height: 20),
 
-                      // Save & Continue button themed to app
+                      // Save & Continue
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
@@ -436,13 +508,128 @@ class _AddContactScreenState extends State<AddContactScreen>
         return;
       }
       setState(() => _isUploading = true);
-      await _registerSpeakerLocal(_currentRecordingPath!);
+
+      // Validate: correct sentence + loud enough (ASR + RMS)
+      final ok = await _validateRecordingForStep(_currentRecordingPath!);
+
       if (!mounted) return;
       setState(() => _isUploading = false);
+
+      if (!ok) {
+        setState(() => _showTryAgain = true);
+        _showSnackbar("Please say the shown sentence clearly and loudly.", Colors.redAccent);
+        return;
+      }
+
+      await _registerSpeakerLocal(_currentRecordingPath!);
     } else {
       setState(() => _showTryAgain = true);
       _showSnackbar("No audio detected. Please try again.", Colors.redAccent);
     }
+  }
+  Future<Float32List> _readWavAsFloat32(String path) async {
+    final bytes = await File(path).readAsBytes();
+    final bd = ByteData.sublistView(bytes, 44); // skip 44-byte WAV header
+    final n = bd.lengthInBytes ~/ 2;
+    final out = Float32List(n);
+    for (var i = 0; i < n; i++) {
+      final sample = bd.getInt16(i * 2, Endian.little);
+      out[i] = sample / 32768.0;
+    }
+    return out;
+  }
+  // ======== Validate with ASR + RMS check ========
+  Future<bool> _validateRecordingForStep(String filePath) async {
+    try {
+      final gate = await _measureRmsAndDuration(filePath);
+      if (gate.durationSec < 0.9 || gate.rms < 0.015) return false;
+
+      if (_asr == null) return false;
+
+      final stream = _asr!.createStream();
+      final samples = await _readWavAsFloat32(filePath);
+
+      // Feed into recognizer
+      stream.acceptWaveform(
+        samples: samples,
+        sampleRate: 16000,
+      );
+
+
+      _asr!.decode(stream);
+      final result = _asr!.getResult(stream);
+      final text = result.text.toLowerCase().trim();
+      stream.free();
+
+      final expected = _normalize(_sentences[_currentIndex]);
+      final got = _normalize(text);
+      if (got.isEmpty) return false;
+
+      final score = _tokenMatchScore(expected, got);
+      return score >= 0.60;
+    } catch (e) {
+      debugPrint('[ASR] validate error: $e');
+      return false;
+    }
+  }
+
+  // simple normalizer: lower + keep a-z0-9 space
+  String _normalize(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9 ]+'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  double _tokenMatchScore(String expected, String got) {
+    final a = expected.split(' ');
+    final b = got.split(' ');
+    if (a.isEmpty || b.isEmpty) return 0.0;
+
+    final setA = a.toSet();
+    final setB = b.toSet();
+    final inter = setA.intersection(setB).length.toDouble();
+    final score1 = inter / max(1, setA.length);
+    final score2 = inter / max(1, setB.length);
+    return (score1 + score2) / 2.0; // symmetric
+  }
+
+  // quick WAV parse just to compute duration + RMS
+  Future<_RmsDur> _measureRmsAndDuration(String path) async {
+    final bytes = await File(path).readAsBytes();
+    if (bytes.length < 44) return _RmsDur(0, 0);
+    String s(int o, int n) => String.fromCharCodes(bytes.sublist(o, o + n));
+    if (s(0, 4) != 'RIFF' || s(8, 4) != 'WAVE') return _RmsDur(0, 0);
+    final bd = bytes.buffer.asByteData();
+    int? sampleRate, bitsPerSample, dataOffset, dataSize, numChannels;
+
+    int off = 12;
+    while (off + 8 <= bytes.length) {
+      final id = s(off, 4);
+      final size = bd.getUint32(off + 4, Endian.little);
+      final next = off + 8 + size + (size.isOdd ? 1 : 0);
+      if (id == 'fmt ') {
+        final fmt = bd.getUint16(off + 8, Endian.little);
+        numChannels = bd.getUint16(off + 10, Endian.little);
+        sampleRate = bd.getUint32(off + 12, Endian.little);
+        bitsPerSample = bd.getUint16(off + 22, Endian.little);
+        if (fmt != 1 || bitsPerSample != 16 || (numChannels ?? 0) < 1) {
+          return _RmsDur(0, 0);
+        }
+      } else if (id == 'data') {
+        dataOffset = off + 8;
+        dataSize = size;
+        break;
+      }
+      off = next;
+    }
+    if (sampleRate == null || dataOffset == null || dataSize == null) return _RmsDur(0, 0);
+
+    final samples = dataSize! ~/ 2;
+    double sumSq = 0.0;
+    for (int i = 0; i < samples; i++) {
+      final v = bd.getInt16(dataOffset! + i * 2, Endian.little) / 32768.0;
+      sumSq += v * v;
+    }
+    final rms = sqrt(sumSq / max(1, samples));
+    final secs = samples / (sampleRate! * (numChannels ?? 1));
+    return _RmsDur(rms, secs);
   }
 
   Future<void> _registerSpeakerLocal(String filePath) async {
@@ -883,7 +1070,6 @@ class _AddContactScreenState extends State<AddContactScreen>
                           fontSize: 16,
                         ),
                       )
-
                   ),
                   if (_showTryAgain)
                     Padding(
@@ -954,4 +1140,10 @@ class _ProgressDots extends StatelessWidget {
       }),
     );
   }
+}
+
+class _RmsDur {
+  final double rms;
+  final double durationSec;
+  _RmsDur(this.rms, this.durationSec);
 }

@@ -93,9 +93,6 @@ class _MyAppState extends State<MyApp> {
     await _speakerService.init();
     if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _messengerKey.currentState?.showSnackBar(
-        const SnackBar(content: Text('Speaker model loaded')),
-      );
     });
   }
 

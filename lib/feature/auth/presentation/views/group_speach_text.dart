@@ -10,11 +10,13 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+
+// ADDED: sequential speaker-ID helpers (no parallel mic usage)
+import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart' as rec;
+import '../../../../core/speaker/speaker_service.dart';
 
 import '../../../../core/utils/routing/routes.dart';
-import '../../../../core/speaker/speaker_service.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -43,10 +45,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   Color _myColor = const Color(0xFF1E88E5);
 
   final FlutterTts _flutterTts = FlutterTts();
-  final SpeakerService _speakerService = SpeakerService();
-  late final Future<void> _speakerInitFuture;
-  final rec.AudioRecorder _recorder = rec.AudioRecorder();
-  String? _currentRecordingPath;
 
   String _appLanguageCode = 'en';
 
@@ -64,6 +62,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   String _latestSentence = '';
   Timer? _latestSentenceTimer;
 
+  // ====== ADDED: Speaker-ID (sequential) ======
+  final AudioRecorder _segRec = AudioRecorder();
+  final SpeakerService _spkSvc = SpeakerService();
+  bool _idBusy = false;
+  bool _identifyingNow = false;
+  String _currentSpeaker = '';
+  double _currentScore = 0.0;
+
+  // Gate so we only start recording for ID after STT fully released mic
+  Completer<void>? _sttFullyStopped;
+
   @override
   void initState() {
     super.initState();
@@ -74,7 +83,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       upperBound: 1.13,
     )..repeat(reverse: true);
     _speech.initialize(onStatus: _onSpeechStatus, onError: _onSpeechError);
-    _speakerInitFuture = _speakerService.init();
     _initUser();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
@@ -85,6 +93,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _firestore = FirebaseFirestore.instance;
     _meetingDocId = "meeting_${DateTime.now().millisecondsSinceEpoch}";
     _loadPreviousMessages();
+
+    // ADDED: init speaker service
+    _initSpeakerSvc();
+  }
+
+  Future<void> _initSpeakerSvc() async {
+    await _spkSvc.init();
   }
 
   Future<void> _loadPreviousMessages() async {
@@ -128,8 +143,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
-    _recorder.dispose();
     _scrollController.dispose();
+    // ADDED:
+    _segRec.dispose();
     super.dispose();
   }
 
@@ -163,6 +179,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     await _initTTS();
   }
 
+  Future<void> _initTTS() async {
+    final ttsLocale = _localeIdForLanguage(_appLanguageCode).replaceAll('_', '-');
+    await _flutterTts.setLanguage(ttsLocale);
+    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setSpeechRate(0.32);
+    await _flutterTts.setVolume(1.0);
+  }
+
   Future<void> _initUser() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? 'Me';
@@ -171,14 +195,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       _myName = _capitalize(name);
       _myColor = const Color(0xFF1E88E5);
     });
-  }
-
-  Future<void> _initTTS() async {
-    final ttsLocale = _localeIdForLanguage(_appLanguageCode).replaceAll('_', '-');
-    await _flutterTts.setLanguage(ttsLocale);
-    await _flutterTts.setPitch(1.0);
-    await _flutterTts.setSpeechRate(0.32);
-    await _flutterTts.setVolume(1.0);
   }
 
   String _capitalize(String s) {
@@ -209,6 +225,27 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     }
   }
 
+  // ADDED: pick a supported STT locale to avoid silent init failures
+  Future<String?> _chooseSupportedLocale(String preferred) async {
+    try {
+      final locales = await _speech.locales();
+      if (locales.isEmpty) return null;
+      final exact = locales.firstWhere(
+            (l) => l.localeId == preferred,
+        orElse: () => locales.first,
+      );
+      if (exact.localeId == preferred) return preferred;
+      final lang = preferred.split('_').first;
+      final byLang = locales.firstWhere(
+            (l) => l.localeId.startsWith(lang),
+        orElse: () => locales.first,
+      );
+      return byLang.localeId;
+    } catch (_) {
+      return null;
+    }
+  }
+
   int get _usersInMeetingCount {
     final users = <String>{_myName};
     for (var m in _messages) {
@@ -219,62 +256,48 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   void _onSpeechStatus(String status) {
-    if (status == 'notListening' && _isRecording) {
+    // Complete the “fully stopped” gate when platform says it's done
+    if (status == 'notListening') {
+      _sttFullyStopped?.complete();
+    }
+    // Auto-restart only when user requested and no ID capture running
+    if (status == 'notListening' && _isRecording && !_identifyingNow) {
       _startListening();
     }
   }
 
   void _onSpeechError(SpeechRecognitionError error) {
-    if (_isRecording) {
-      _startListening();
-    }
-  }
-
-  Future<void> _startRecordingClip() async {
-    if (!await _recorder.hasPermission()) return;
-    final dir = await getTemporaryDirectory();
-    _currentRecordingPath =
-        '${dir.path}/clip_${DateTime.now().millisecondsSinceEpoch}.wav';
-    await _recorder.start(
-      const rec.RecordConfig(
-        encoder: rec.AudioEncoder.wav,
-        sampleRate: 16000,
-        numChannels: 1,
-        bitRate: 128000,
-      ),
-      path: _currentRecordingPath,
-    );
-  }
-
-  Future<String?> _stopRecordingClip() async {
-    try {
-      final isRec = await _recorder.isRecording();
-      if (!isRec) return null;
-      return await _recorder.stop();
-    } catch (_) {
-      return null;
-    }
+    setState(() {
+      _isRecording = false;
+      _amplitude = 0;
+    });
+    _toast('Speech error: ${error.errorMsg} (${error.permanent ? "permanent" : "recoverable"})');
   }
 
   Future<void> _startListening() async {
-    if (!_speech.isAvailable) {
-      final available = await _speech.initialize(
-        onStatus: _onSpeechStatus,
-        onError: _onSpeechError,
-      );
-      if (!available) return;
+    // Don’t start while we’re in the identification mic step
+    if (_identifyingNow) return;
+
+    final available = await _speech.initialize(
+      onStatus: _onSpeechStatus,
+      onError: _onSpeechError,
+      debugLogging: false,
+    );
+    if (!available) {
+      _toast('Speech recognition not available on this device.');
+      return;
     }
     setState(() {
       _isRecording = true;
     });
-    await _startRecordingClip();
-    // Always listen in the user's selected app language to support
-    // multilingual speech recognition.
-    final localeId = _localeIdForLanguage(_appLanguageCode);
+
+    final preferred = _localeIdForLanguage(_appLanguageCode);
+    final chosenLocale = await _chooseSupportedLocale(preferred) ?? preferred;
+
     _speech.listen(
       onResult: _onSpeechResult,
       listenMode: ListenMode.dictation,
-      localeId: localeId,
+      localeId: chosenLocale,
       partialResults: true,
       listenFor: const Duration(hours: 1),
       pauseFor: const Duration(seconds: 5),
@@ -288,12 +311,51 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   Future<void> _stopListening() async {
-    await _stopRecordingClip();
+    // Prepare a gate so we know when the platform fully releases the mic
+    _sttFullyStopped = Completer<void>();
     await _speech.stop();
     setState(() {
       _isRecording = false;
       _amplitude = 0;
     });
+    // Wait until onStatus(notListening) fires (or timeout)
+    try {
+      await _sttFullyStopped!.future.timeout(const Duration(milliseconds: 800));
+    } catch (_) {}
+    // Extra tiny delay to be safe on some OEMs
+    await Future.delayed(const Duration(milliseconds: 180));
+  }
+
+  // Record a short segment AFTER STT has fully released the mic
+  Future<String?> _recordShortSegment({int milliseconds = 1400}) async {
+    try {
+      final ok = await _segRec.hasPermission();
+      if (!ok) {
+        _toast('Microphone permission denied.');
+        return null;
+      }
+
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/stt_seg_${DateTime.now().millisecondsSinceEpoch}.wav';
+
+      const cfg = RecordConfig(
+        encoder: AudioEncoder.wav,
+        sampleRate: 16000,
+        numChannels: 1,
+        bitRate: 128000,
+      );
+
+      await _segRec.start(cfg, path: path);
+      await Future.delayed(Duration(milliseconds: milliseconds));
+      final saved = await _segRec.stop();
+      if (saved == null) {
+        _toast('No audio captured for speaker ID.');
+      }
+      return saved;
+    } catch (e) {
+      _toast('Record error: $e');
+      return null;
+    }
   }
 
   void _onSpeechResult(SpeechRecognitionResult result) async {
@@ -305,42 +367,97 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     });
 
     if (!result.finalResult) return;
-    final audioPath = await _stopRecordingClip();
-    String speaker = _myName;
-    if (audioPath != null) {
-      try {
-        await _speakerInitFuture;
-        final id = await _speakerService.identify(audioPath);
-        if (id != null && id.isNotEmpty) {
-          speaker = _capitalize(id);
-        }
-      } catch (e) {
-        debugPrint('[GroupSpeechToText] identify failed: $e');
-      }
-    }
+
+    // Add the message first (we will relabel the “user” after ID completes)
     setState(() {
       _messages.add({
-        'user': speaker,
+        'user': _myName,
         'text': text,
         'time': TimeOfDay.now().format(context),
-        'isMe': speaker == _myName,
+        'isMe': true,
         'spoken': false,
       });
     });
+
+    // === Sequential speaker ID capture ===
+    if (!_idBusy) {
+      _idBusy = true;
+      setState(() => _identifyingNow = true);
+
+      // Stop STT and wait until it fully releases the mic
+      await _stopListening();
+
+      // Ensure TTS is not speaking during capture
+      await _flutterTts.stop();
+
+      final segPath = await _recordShortSegment(milliseconds: 1400);
+      await _identifyAndAttachToLastMessage(segPath);
+
+      setState(() => _identifyingNow = false);
+      _idBusy = false;
+    }
+
     _latestSentenceTimer?.cancel();
     _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-      setState(() => _latestSentence = '');
+      if (mounted) setState(() => _latestSentence = '');
     });
+
     unawaited(_saveCurrentMeetingToFirestore());
     if (_speakOnMeeting) {
       await _speakMyLastMessage(text);
     }
     if (_shouldAutoscroll) _scrollToBottom(animate: true);
 
-    // Restart listening to keep capturing subsequent speech input.
-    if (_isRecording) {
+    // Resume STT
+    if (mounted) {
       _startListening();
     }
+  }
+
+  Future<void> _identifyAndAttachToLastMessage(String? wavPath) async {
+    if (wavPath == null || _messages.isEmpty) return;
+
+    String? name;
+    double score = 0.0;
+
+    try {
+      // Try rich API if your service implements it
+      try {
+        final dynamic svc = _spkSvc;
+        final dynamic res = await svc.identifyScores(
+          wavPath,
+          topK: 3,
+          includeBelowThreshold: true,
+        );
+        if (res is List && res.isNotEmpty) {
+          final top = res.first;
+          final id = (top['id'] ?? top['name'] ?? top['speaker'] ?? top['label'] ?? '').toString();
+          final sc = top['score'] ?? top['confidence'] ?? top['prob'] ?? top['similarity'] ?? 0.0;
+          name = id.isEmpty ? null : id;
+          if (sc is num) score = sc.toDouble().clamp(0.0, 1.0);
+        }
+      } catch (_) {
+        // Fallback to simple API
+        name = await _spkSvc.identify(
+          wavPath,
+          threshold: 0.74,
+          secondBestMargin: 0.035,
+          displayThreshold: 0.40,
+        );
+      }
+    } catch (e) {
+      _toast('Identify error: $e');
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      final idx = _messages.length - 1;
+      _messages[idx]['user'] = name ?? 'Anonymous';
+      _messages[idx]['isMe'] = (name ?? '') == _myName;
+      _currentSpeaker = name ?? '';
+      _currentScore = score;
+    });
   }
 
   void _scrollToBottom({bool animate = true}) {
@@ -426,6 +543,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       }).toList(),
     });
     _savingHistory = false;
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
@@ -657,6 +779,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                         ),
                         textAlign: TextAlign.center,
                       ),
+                      if (_currentSpeaker.isNotEmpty) ...[
+                        const SizedBox(width: 10),
+                        Chip(
+                          avatar: const Icon(Icons.person, size: 16),
+                          label: Text(_currentSpeaker),
+                        ),
+                      ],
                     ],
                   ),
                   Expanded(
@@ -860,6 +989,28 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                     ),
                   ),
                 ),
+
+              // ADDED: small overlay during mic handoff for ID
+              if (_identifyingNow)
+                Positioned(
+                  top: 12,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Text(
+                        'Identifying speaker…',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+
               if (_showScrollDownBtn && _messages.isNotEmpty)
                 Positioned(
                   bottom: 90,
