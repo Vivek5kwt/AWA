@@ -82,7 +82,6 @@ class _SpeakerScreenState extends State<SpeakerScreen> {
   @override
   void dispose() {
     _recorder.dispose();
-    _service.dispose();
     super.dispose();
   }
 

@@ -131,7 +131,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     _ampTimer?.cancel();
     _maxRecordTimer?.cancel();
     _recorder.dispose();
-    _speakerService.dispose();
     _micPulse.dispose();
     _checkBurst.dispose();
     _nameController?.dispose();
