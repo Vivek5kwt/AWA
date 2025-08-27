@@ -25,18 +25,29 @@ class _Wav {
 /// - Otherwise robust heuristic (RMS/ZCR + bands + VAD)
 /// Stores multiple samples per user; matches with cosine + margin.
 class SpeakerService {
-  static const _assetModelPath = 'assets/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx';
+  SpeakerService._internal();
+  static final SpeakerService _instance = SpeakerService._internal();
+
+  factory SpeakerService() => _instance;
+
+  static const _assetModelPath =
+      'assets/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx';
 
   SpeakerEmbeddingExtractor? _extractor; // non-null when ONNX model is available
-  String? _modelLocalPath;               // copied model path in app storage
+  String? _modelLocalPath; // copied model path in app storage
 
-  late String _storeKey;                 // per-mode bucket
+  late String _storeKey; // per-mode bucket
+
+  bool _initialized = false;
 
   bool get isReady => _extractor != null;
   bool get isFallback => _extractor == null;
 
   /// Initialize backend + decide per-mode storage key.
   Future<void> init() async {
+    if (_initialized) return;
+    _initialized = true;
+
     try {
       initBindings();
     } catch (_) {}
@@ -77,10 +88,12 @@ class SpeakerService {
   }
 
   Future<void> dispose() async {
+    if (!_initialized) return;
     try {
       _extractor?.free();
     } catch (_) {}
     _extractor = null;
+    _initialized = false;
   }
 
   // ---------------- Public API ----------------
