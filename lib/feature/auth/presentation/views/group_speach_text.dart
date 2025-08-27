@@ -44,6 +44,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   final FlutterTts _flutterTts = FlutterTts();
   final SpeakerService _speakerService = SpeakerService();
+  late final Future<void> _speakerInitFuture;
   final rec.AudioRecorder _recorder = rec.AudioRecorder();
   String? _currentRecordingPath;
 
@@ -73,7 +74,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       upperBound: 1.13,
     )..repeat(reverse: true);
     _speech.initialize(onStatus: _onSpeechStatus, onError: _onSpeechError);
-    unawaited(_speakerService.init());
+    _speakerInitFuture = _speakerService.init();
     _initUser();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
@@ -308,9 +309,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     final audioPath = await _stopRecordingClip();
     String speaker = _myName;
     if (audioPath != null) {
-      final id = await _speakerService.identify(audioPath);
-      if (id != null && id.isNotEmpty) {
-        speaker = _capitalize(id);
+      try {
+        await _speakerInitFuture;
+        final id = await _speakerService.identify(audioPath);
+        if (id != null && id.isNotEmpty) {
+          speaker = _capitalize(id);
+        }
+      } catch (e) {
+        debugPrint('[GroupSpeechToText] identify failed: $e');
       }
     }
     setState(() {
