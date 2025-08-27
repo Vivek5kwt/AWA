@@ -11,6 +11,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'feature/common_widgets/custom_toast.dart';
 import 'core/utils/routing/routes_generator.dart';
 import 'dart:async';
+import 'core/speaker/speaker_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -69,6 +70,9 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   late Locale _locale;
   late final StreamSubscription<ConnectivityResult> _connectivitySubscription;
+  final SpeakerService _speakerService = SpeakerService();
+  final GlobalKey<ScaffoldMessengerState> _messengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
   @override
   void initState() {
@@ -81,6 +85,17 @@ class _MyAppState extends State<MyApp> {
             msg: "Please check your Internet Connection",
             isError: true);
       }
+    });
+    _loadSpeakerModel();
+  }
+
+  Future<void> _loadSpeakerModel() async {
+    await _speakerService.init();
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _messengerKey.currentState?.showSnackBar(
+        const SnackBar(content: Text('Speaker model loaded')),
+      );
     });
   }
 
@@ -98,6 +113,7 @@ class _MyAppState extends State<MyApp> {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(primarySwatch: Colors.blue),
         routerConfig: appRouter,
+        scaffoldMessengerKey: _messengerKey,
         locale: _locale,
         supportedLocales: const [
           Locale('en'),
@@ -132,6 +148,7 @@ class _MyAppState extends State<MyApp> {
   @override
   void dispose() {
     _connectivitySubscription.cancel();
+    _speakerService.dispose();
     super.dispose();
   }
 }
