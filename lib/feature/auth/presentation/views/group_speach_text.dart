@@ -107,6 +107,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   Future<void> _initSpeakerSvc() async {
     await _spkSvc.init();
+    // Log locally registered speakers so it's easy to verify
+    try {
+      final names = await _spkSvc.listRegistered();
+      print('--- Registered speakers (' + names.length.toString() + ') ---');
+      for (final n in names) {
+        print('  ' + n);
+      }
+    } catch (e) {
+      // Ignore failures but show a hint in the console
+      print('Error loading registered speakers: ' + e.toString());
+    }
   }
 
   Future<void> _loadPreviousMessages() async {
@@ -501,57 +512,49 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     try {
       final segPath = await _recordShortSegment(milliseconds: 1200);
       if (segPath != null && !_isDisposed) {
-        // Try detailed API with scores first
-        bool usedRich = false;
-        try {
-          final dynamic svc = _spkSvc;
-          final dynamic res = await svc.identifyScores(
-            segPath,
-            topK: 5,
-            includeBelowThreshold: true,
-          );
+        final res = await _spkSvc.identifyScores(
+          segPath,
+          topK: 5,
+          includeBelowThreshold: true,
+        );
 
-          if (res is List && res.isNotEmpty) {
-            usedRich = true;
-            print('--- Speaker candidates ---');
-            debugPrint('--- Speaker candidates ---');
-            for (final c in res) {
-              final name =
-                  (c['id'] ?? c['name'] ?? c['speaker'] ?? c['label'] ?? '')
-                      .toString();
-              final scoreNum = c['score'] ??
-                  c['confidence'] ??
-                  c['prob'] ??
-                  c['similarity'] ??
-                  0.0;
-              final score =
-                  (scoreNum is num) ? scoreNum.toDouble().clamp(0.0, 1.0) : 0.0;
-              print('  $name : ${(score * 100).toStringAsFixed(1)}%');
-              debugPrint('  $name : ${(score * 100).toStringAsFixed(1)}%');
-              allCands.add({'name': name, 'score': score});
-            }
-            final top = res.first;
-            bestName = (top['id'] ??
-                    top['name'] ??
-                    top['speaker'] ??
-                    top['label'] ??
-                    '')
-                .toString();
-            final sc = top['score'] ??
-                top['confidence'] ??
-                top['prob'] ??
-                top['similarity'] ??
+        if (res.isNotEmpty) {
+          print('--- Speaker candidates ---');
+          for (final c in res) {
+            final name =
+                (c['id'] ?? c['name'] ?? c['speaker'] ?? c['label'] ?? '')
+                    .toString();
+            final scoreNum = c['score'] ??
+                c['confidence'] ??
+                c['prob'] ??
+                c['similarity'] ??
                 0.0;
-            bestScore = (sc is num) ? sc.toDouble().clamp(0.0, 1.0) : 0.0;
-            print(
-                'Best match = $bestName @ ${(bestScore * 100).toStringAsFixed(1)}%');
-            debugPrint(
-                'Best match = $bestName @ ${(bestScore * 100).toStringAsFixed(1)}%');
+            final score =
+                (scoreNum is num) ? scoreNum.toDouble().clamp(0.0, 1.0) : 0.0;
+            print('  $name : ${(score * 100).toStringAsFixed(1)}%');
+            allCands.add({'name': name, 'score': score});
           }
-        } catch (_) {}
+          final top = res.first;
+          bestName = (top['id'] ??
+                  top['name'] ??
+                  top['speaker'] ??
+                  top['label'] ??
+                  '')
+              .toString();
+          final sc = top['score'] ??
+              top['confidence'] ??
+              top['prob'] ??
+              top['similarity'] ??
+              0.0;
+          bestScore = (sc is num) ? sc.toDouble().clamp(0.0, 1.0) : 0.0;
+          print(
+              'Best match = $bestName @ ${(bestScore * 100).toStringAsFixed(1)}%');
+        } else {
+          print('No speaker candidates returned.');
+        }
 
-        if (!usedRich) {
-          // Fallback to simple API
+        if (allCands.isEmpty) {
+          // Fallback to simple API and still log the result
           final n = await _spkSvc.identify(
             segPath,
             threshold: 0.74,
@@ -564,8 +567,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
             allCands.add({'name': n, 'score': 1.0});
           }
           print(
-              'Best match (fallback) = ${bestName ?? "null"} @ ${(bestScore * 100).toStringAsFixed(1)}%');
-          debugPrint(
               'Best match (fallback) = ${bestName ?? "null"} @ ${(bestScore * 100).toStringAsFixed(1)}%');
         }
       }
