@@ -1,20 +1,17 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
-import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:wave_blob/wave_blob.dart';
-import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 import '../../../../core/speaker/speaker_service.dart';
@@ -63,8 +60,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _showTextMyLanguage = false;
 
   final List<_AudioQueueItem> _audioQueue = [];
-  bool _isApiProcessing = false;
+  bool _isProcessingQueue = false;
   int _audioLabel = 0;
+  final SpeechToText _speechToText = SpeechToText();
+  bool _speechAvailable = false;
+  String _currentTranscript = '';
 
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
@@ -94,6 +94,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
     _loadAppLanguageCode();
+    _initSpeech();
     _scrollController = ScrollController();
     _scrollController.addListener(_handleScroll);
 
@@ -179,6 +180,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
   }
 
+  Future<void> _initSpeech() async {
+    _speechAvailable = await _speechToText.initialize();
+  }
+
   Future<void> _initUser() async {
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? 'Me';
@@ -205,9 +210,26 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return s[0].toUpperCase() + s.substring(1);
   }
 
-  String _generateTempFilePath() {
+String _generateTempFilePath() {
     final tempDir = Directory.systemTemp;
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
+  }
+
+  void _startSpeechRecognition() {
+    if (!_speechAvailable) return;
+    _currentTranscript = '';
+    _speechToText.listen(
+      localeId: _appLanguageCode,
+      onResult: (result) {
+        _currentTranscript = result.recognizedWords;
+      },
+    );
+  }
+
+  Future<String> _stopSpeechRecognition() async {
+    if (!_speechAvailable) return _currentTranscript;
+    await _speechToText.stop();
+    return _currentTranscript;
   }
 
   Future<void> _startListening() async {
@@ -239,8 +261,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       ),
       path: _currentFilePath!,
     );
-
-
+    _startSpeechRecognition();
 
     _continueRecordingCycle();
   }
@@ -249,7 +270,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     while (_isRecording) {
       await Future.delayed(const Duration(seconds: 5));
       if (!_isRecording) break;
-
+      final text = await _stopSpeechRecognition();
       final String? stoppedPath = await _recorder.stop();
       if (stoppedPath != null) {
         final File audioFile = File(stoppedPath);
@@ -257,7 +278,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         bool shouldSend = await _isAudioSignificant(audioFile);
         if (shouldSend) {
           _resetSilenceTimer();
-          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
+          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label, text: text));
           _processAudioQueue();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -285,6 +306,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         ),
         path: _currentFilePath!,
       );
+      _startSpeechRecognition();
     }
   }
 
@@ -315,6 +337,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
     _silenceTimer?.cancel();
     _amplitudeTimer?.cancel();
+    final text = await _stopSpeechRecognition();
 
     String? stoppedPath;
     if (await _recorder.isRecording()) {
@@ -332,7 +355,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
           bool shouldSend = await _isAudioSignificant(file);
           if (shouldSend) {
             _resetSilenceTimer();
-            _audioQueue.add(_AudioQueueItem(file: file, label: label));
+            _audioQueue.add(_AudioQueueItem(file: file, label: label, text: text));
             _processAudioQueue();
           }
         }
@@ -416,242 +439,53 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   void _processAudioQueue() async {
-    if (_isApiProcessing || _audioQueue.isEmpty) return;
-    _isApiProcessing = true;
+    if (_isProcessingQueue || _audioQueue.isEmpty) return;
+    _isProcessingQueue = true;
     while (_audioQueue.isNotEmpty) {
       final item = _audioQueue.removeAt(0);
-      await _hitIdentifySpeaker(item.file, item.label);
+      await _handleLocalSpeech(item);
       await Future.delayed(const Duration(milliseconds: 200));
     }
-    _isApiProcessing = false;
+    _isProcessingQueue = false;
   }
 
-  Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedEmail = prefs.getString('email') ?? '';
+  Future<void> _handleLocalSpeech(_AudioQueueItem item) async {
+    final text = item.text;
+    if (text.trim().isEmpty) return;
 
-    final base = _showTextMyLanguage
-        ? ApiConstants.identifySpeakerNative
-        : ApiConstants.identifySpeaker;
-    Uri uri = Uri.parse('$base?email=$storedEmail&label=$label');
-    void showAccountDeletedDialog() {
-      showGeneralDialog(
-        context: context,
-        barrierDismissible: false,
-        barrierLabel: "accountDeleted",
-        pageBuilder: (ctx, _, __) => WillPopScope(
-          onWillPop: () async => false,
-          child: Container(
-            color: widget.isDarkMode ? Color(0xFF181A20) : Color(0xFFFCF6BA),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                child: Material(
-                  borderRadius: BorderRadius.circular(26),
-                  color: widget.isDarkMode
-                      ? Colors.blueGrey[900]!.withOpacity(0.98)
-                      : Colors.white.withOpacity(0.97),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(30),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.block_rounded,
-                          color: widget.isDarkMode
-                              ? Colors.cyanAccent
-                              : Colors.deepPurpleAccent,
-                          size: 55,
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          "Your account has been blocked",
-                          style: TextStyle(
-                            color: widget.isDarkMode
-                                ? Colors.cyanAccent
-                                : Colors.deepPurpleAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                            letterSpacing: 1.1,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          "For security reasons, your account was blocked by admin. Please contact our support team for assistance.",
-                          style: TextStyle(
-                            color: widget.isDarkMode
-                                ? Colors.white70
-                                : Colors.blueGrey.shade700,
-                            fontSize: 16,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 26),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: widget.isDarkMode
-                                ? Colors.cyanAccent.withOpacity(0.85)
-                                : Colors.deepPurpleAccent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 38, vertical: 14),
-                          ),
-                          icon: Icon(
-                            Icons.support_agent_rounded,
-                            color: widget.isDarkMode ? Colors.black : Colors.white,
-                            size: 26,
-                          ),
-                          label: Text(
-                            "Contact Support",
-                            style: TextStyle(
-                                color: widget.isDarkMode
-                                    ? Colors.black
-                                    : Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 17.3),
-                          ),
-                          onPressed: () {
-                            context.go(Routes.login);
-                          },
-                        ),
-                        const SizedBox(height: 15),
-                        TextButton(
-                            onPressed: () {
-                              context.go(Routes.login);
-                            },
-                            child: Text(
-                              "Exit App",
-                              style: TextStyle(
-                                  color: widget.isDarkMode
-                                      ? Colors.cyanAccent
-                                      : Colors.deepPurpleAccent,
-                                  fontSize: 15.5,
-                                  fontWeight: FontWeight.bold),
-                            )
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    Future<http.StreamedResponse> sendRequest(Uri targetUri) {
-      final request = http.MultipartRequest('POST', targetUri)
-        ..files.add(
-          http.MultipartFile.fromBytes(
-            'audio_file',
-            audioFile.readAsBytesSync(),
-            filename: audioFile.path.split('/').last,
-            contentType: MediaType('audio', 'wav'),
-          ),
-        );
-      return request.send();
-    }
-
+    String? localName;
     try {
-      http.StreamedResponse streamed = await sendRequest(uri);
-      http.Response response = await http.Response.fromStream(streamed);
-
-      if (response.statusCode == 307 || response.statusCode == 302) {
-        final location = streamed.headers['location'];
-        if (location != null) {
-          uri = Uri.parse(location);
-          streamed = await sendRequest(uri);
-          response = await http.Response.fromStream(streamed);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Redirect without Location header'),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-          return;
-        }
-      }
-      if (response.statusCode == 204) {
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (mounted) showAccountDeletedDialog();
-        setState(() {
-        });
-        return;
-      }
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        final speakers = body['speakers'] as List<dynamic>;
-        String? localName;
-        try {
-          localName = await _speakerService.identify(audioFile.path);
-        } catch (_) {
-          localName = null;
-        }
-
-        setState(() {
-          for (var speakerEntry in speakers) {
-            final key = (speakerEntry as Map<String, dynamic>).keys.first;
-            final data = speakerEntry[key] as Map<String, dynamic>;
-            final apiName = data['name'] as String? ?? 'Unknown';
-            final name = localName ?? apiName;
-            final text = data['spoken_text'] as String? ?? '';
-            final time = TimeOfDay.now().format(context);
-
-            if (text.trim().isEmpty) {
-              continue;
-            }
-            if (!_showTextMyLanguage &&
-                !_isTextInLanguage(text, _appLanguageCode)) {
-              continue;
-            }
-
-            _messages.add({
-              'user': name,
-              'text': text,
-              'time': time,
-              'isMe': false,
-              'spoken': false,
-              'audioLabel': label,
-            });
-            _latestSentence = text;
-            _latestSentenceTimer?.cancel();
-            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-              setState(() {
-                _latestSentence = '';
-              });
-            });
-            _speakerIndex++;
-          }
-        });
-
-        await _saveCurrentMeetingToFirestore();
-        if (_shouldAutoscroll) _scrollToBottom(animate: true);
-      } else {
-        final errorBody = response.body.isNotEmpty
-            ? response.body
-            : 'No error message from API';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('API error ${response.statusCode}: $errorBody'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to call API: $e'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      localName = await _speakerService.identify(item.file.path);
+    } catch (_) {
+      localName = null;
     }
+
+    if (!_showTextMyLanguage && !_isTextInLanguage(text, _appLanguageCode)) {
+      return;
+    }
+
+    final time = TimeOfDay.now().format(context);
+    setState(() {
+      _messages.add({
+        'user': localName ?? 'Unknown',
+        'text': text,
+        'time': time,
+        'isMe': false,
+        'spoken': false,
+        'audioLabel': item.label,
+      });
+      _latestSentence = text;
+      _speakerIndex++;
+    });
+    _latestSentenceTimer?.cancel();
+    _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+      setState(() {
+        _latestSentence = '';
+      });
+    });
+
+    await _saveCurrentMeetingToFirestore();
+    if (_shouldAutoscroll) _scrollToBottom(animate: true);
   }
 
   Future<void> _sendTextMessage() async {
@@ -1349,7 +1183,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 class _AudioQueueItem {
   final File file;
   final int label;
-  _AudioQueueItem({required this.file, required this.label});
+  final String text;
+  _AudioQueueItem({required this.file, required this.label, required this.text});
 }
 
 
