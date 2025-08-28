@@ -182,11 +182,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   Future<void> _initSpeech() async {
     try {
-      _speechAvailable = await _speechToText.initialize();
+      _speechAvailable = await _speechToText.initialize(
+        onStatus: (status) => debugPrint('Speech status: ' + status),
+        onError: (error) => debugPrint('Speech error: ' + error.errorMsg),
+      );
+      debugPrint('Speech availability: ' + _speechAvailable.toString());
       if (!_speechAvailable) {
         Future.delayed(const Duration(seconds: 2), _initSpeech);
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Speech init failed: ' + e.toString());
       Future.delayed(const Duration(seconds: 2), _initSpeech);
     }
   }
@@ -228,6 +233,7 @@ String _generateTempFilePath() {
     }
     if (!_speechAvailable) return;
     _currentTranscript = '';
+    debugPrint('Starting speech recognition for locale: ' + _appLanguageCode);
     // Ensure any existing session is fully stopped before starting a new one.
     if (_speechToText.isListening) {
       await _speechToText.stop();
@@ -236,6 +242,7 @@ String _generateTempFilePath() {
       localeId: _appLanguageCode,
       onResult: (result) {
         _currentTranscript = result.recognizedWords;
+        debugPrint('Recognized: ' + result.recognizedWords);
       },
     );
   }
@@ -244,6 +251,7 @@ String _generateTempFilePath() {
     if (!_speechAvailable) return _currentTranscript;
     if (_speechToText.isListening) {
       await _speechToText.stop();
+      debugPrint('Stopped listening. Final transcript: ' + _currentTranscript);
     }
     return _currentTranscript;
   }
