@@ -181,7 +181,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   }
 
   Future<void> _initSpeech() async {
-    _speechAvailable = await _speechToText.initialize();
+    try {
+      _speechAvailable = await _speechToText.initialize();
+      if (!_speechAvailable) {
+        Future.delayed(const Duration(seconds: 2), _initSpeech);
+      }
+    } catch (_) {
+      Future.delayed(const Duration(seconds: 2), _initSpeech);
+    }
   }
 
   Future<void> _initUser() async {
@@ -215,7 +222,10 @@ String _generateTempFilePath() {
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
   }
 
-  void _startSpeechRecognition() {
+  Future<void> _startSpeechRecognition() async {
+    if (!_speechAvailable) {
+      await _initSpeech();
+    }
     if (!_speechAvailable) return;
     _currentTranscript = '';
     _speechToText.listen(
@@ -261,7 +271,7 @@ String _generateTempFilePath() {
       ),
       path: _currentFilePath!,
     );
-    _startSpeechRecognition();
+    await _startSpeechRecognition();
 
     _continueRecordingCycle();
   }
@@ -306,7 +316,7 @@ String _generateTempFilePath() {
         ),
         path: _currentFilePath!,
       );
-      _startSpeechRecognition();
+      await _startSpeechRecognition();
     }
   }
 
