@@ -1,21 +1,22 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui';
-
 import 'package:awa/config/local_extension.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:go_router/go_router.dart';
-import 'package:path_provider/path_provider.dart';
-// ADDED: sequential speaker-ID helpers (no parallel mic usage)
+import 'package:wave_blob/wave_blob.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:speech_to_text/speech_recognition_error.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart';
-import 'package:wave_blob/wave_blob.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:go_router/go_router.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../../../../core/speaker/speaker_service.dart';
+import '../../../../core/utils/routing/routes.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -28,18 +29,26 @@ class GroupSpeechToTextScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<GroupSpeechToTextScreen> createState() =>
-      _GroupSpeechToTextScreenState();
+  State<GroupSpeechToTextScreen> createState() => _GroupSpeechToTextScreenState();
 }
 
-class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
-    with TickerProviderStateMixin {
+class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with TickerProviderStateMixin {
   bool _isRecording = false;
   double _amplitude = 0;
+  Timer? _amplitudeTimer;
   late AnimationController _micGlowController;
-  final SpeechToText _speech = SpeechToText();
+  final AudioRecorder _recorder = AudioRecorder();
 
   final List<Map<String, dynamic>> _messages = [];
+  int _speakerIndex = 0;
+  final List<Color> _userColors = [
+    const Color(0xFF50E3C2),
+    const Color(0xFF8E54E9),
+    const Color(0xFF4776E6),
+    const Color(0xFFFFA726),
+  ];
+
+  String? _currentFilePath;
   final TextEditingController _textController = TextEditingController();
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
@@ -51,6 +60,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   bool _speakOnMeeting = true;
   bool _showTextMyLanguage = false;
 
+  final List<_AudioQueueItem> _audioQueue = [];
+  bool _isApiProcessing = false;
+  int _audioLabel = 0;
+
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
   bool _shouldAutoscroll = true;
@@ -59,25 +72,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   late String _meetingDocId;
   bool _savingHistory = false;
 
-  // Live partial message index; -1 when none
-  int _liveMsgIndex = -1;
-
-  // ====== Speaker-ID (sequential) ======
-  final AudioRecorder _segRec = AudioRecorder();
-  final SpeakerService _spkSvc = SpeakerService();
-  bool _idBusy = false;
-  bool _identifyingNow = false;
-  String _currentSpeaker = '';
-  double _currentScore = 0.0;
-
-  // Gate to ensure STT fully stopped before we grab the mic
-  Completer<void>? _sttFullyStopped;
-
-  // Prevent overlapping short recordings
-  bool _segRecording = false;
-
-  // Guard for async callbacks after dispose
-  bool _isDisposed = false;
+  String _latestSentence = '';
+  Timer? _latestSentenceTimer;
+  Timer? _silenceTimer;
+  final Duration _silenceDuration = const Duration(minutes: 2);
 
   @override
   void initState() {
@@ -88,10 +86,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
-
-    _speech.initialize(onStatus: _onSpeechStatus, onError: _onSpeechError);
-
     _initUser();
+    _initTTS();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
     _loadAppLanguageCode();
@@ -101,27 +97,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _firestore = FirebaseFirestore.instance;
     _meetingDocId = "meeting_${DateTime.now().millisecondsSinceEpoch}";
     _loadPreviousMessages();
-
-    _initSpeakerSvc();
-  }
-
-  Future<void> _initSpeakerSvc() async {
-    await _spkSvc.init();
-    // Log locally registered speakers so it's easy to verify
-    try {
-      final names = await _spkSvc.listRegistered();
-      print('--- Registered speakers (' + names.length.toString() + ') ---');
-      for (final n in names) {
-        print('  ' + n);
-      }
-    } catch (e) {
-      // Ignore failures but show a hint in the console
-      print('Error loading registered speakers: ' + e.toString());
-    }
   }
 
   Future<void> _loadPreviousMessages() async {
-    if (_isDisposed || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? '';
     final doc = await _firestore
@@ -130,34 +108,25 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         .collection('meetings')
         .doc(_meetingDocId)
         .get();
-    if (!mounted || _isDisposed) return;
     if (doc.exists) {
       final data = doc.data()!;
-      if (!mounted || _isDisposed) return;
       setState(() {
         _messages.clear();
-        _messages
-            .addAll(List<Map<String, dynamic>>.from(data['messages'] ?? []));
+        _messages.addAll(List<Map<String, dynamic>>.from(data['messages'] ?? []));
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _isDisposed) return;
-        _scrollToBottom();
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
   }
 
   void _handleScroll() {
-    if (!mounted || _isDisposed) return;
     final atBottom = _scrollController.offset >=
         _scrollController.position.maxScrollExtent - 50;
     if (atBottom && _showScrollDownBtn) {
-      if (!mounted || _isDisposed) return;
       setState(() {
         _showScrollDownBtn = false;
         _shouldAutoscroll = true;
       });
     } else if (!atBottom && !_showScrollDownBtn) {
-      if (!mounted || _isDisposed) return;
       setState(() {
         _showScrollDownBtn = true;
         _shouldAutoscroll = false;
@@ -167,81 +136,63 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   @override
   void dispose() {
-    _isDisposed = true;
-
-    // Stop STT / TTS safely
-    try {
-      if (_speech.isListening) {
-        _speech.stop();
-      }
-    } catch (_) {}
-    _sttFullyStopped = null;
-
+    _amplitudeTimer?.cancel();
+    _latestSentenceTimer?.cancel();
+    _silenceTimer?.cancel();
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
     _scrollController.dispose();
-    _segRec.dispose();
     super.dispose();
   }
 
   Future<void> _loadSpeakOnMeeting() async {
-    if (_isDisposed || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted || _isDisposed) return;
     setState(() {
       _speakOnMeeting = prefs.getBool('speakOnMeeting') ?? true;
     });
   }
 
   Future<void> _loadShowTextMyLanguage() async {
-    if (_isDisposed || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted || _isDisposed) return;
     setState(() {
       _showTextMyLanguage = prefs.getBool('useNativeApi') ?? false;
     });
   }
 
   Future<void> _toggleShowTextMyLanguage() async {
-    if (_isDisposed) return;
     final prefs = await SharedPreferences.getInstance();
     final newVal = !_showTextMyLanguage;
     await prefs.setBool('useNativeApi', newVal);
-    if (!mounted || _isDisposed) return;
     setState(() => _showTextMyLanguage = newVal);
   }
 
   Future<void> _loadAppLanguageCode() async {
-    if (_isDisposed || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
     final code = prefs.getString('language_code');
-    if (!mounted || _isDisposed) return;
     setState(() {
       _appLanguageCode = code ?? Localizations.localeOf(context).languageCode;
     });
-    await _initTTS();
-  }
-
-  Future<void> _initTTS() async {
-    if (_isDisposed) return;
-    final ttsLocale =
-        _localeIdForLanguage(_appLanguageCode).replaceAll('_', '-');
-    await _flutterTts.setLanguage(ttsLocale);
-    await _flutterTts.setPitch(1.0);
-    await _flutterTts.setSpeechRate(0.32);
-    await _flutterTts.setVolume(1.0);
   }
 
   Future<void> _initUser() async {
-    if (_isDisposed || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
     final email = prefs.getString('email') ?? 'Me';
     final name = prefs.getString('name') ?? email.split('@')[0];
-    if (!mounted || _isDisposed) return;
     setState(() {
       _myName = _capitalize(name);
       _myColor = const Color(0xFF1E88E5);
+    });
+  }
+
+  Future<void> _initTTS() async {
+    await _flutterTts.setLanguage("en-IN");
+    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setSpeechRate(0.32);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setVoice({
+      'name': 'en-in-x-end-network',
+      'locale': 'en-IN',
     });
   }
 
@@ -250,436 +201,469 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     return s[0].toUpperCase() + s.substring(1);
   }
 
-  String _localeIdForLanguage(String code) {
-    switch (code) {
-      case 'en':
-        return 'en_IN';
-      case 'hi':
-        return 'hi_IN';
-      case 'pa':
-        return 'pa_IN';
-      case 'gu':
-        return 'gu_IN';
-      case 'ta':
-        return 'ta_IN';
-      case 'mr':
-        return 'mr_IN';
-      case 'bn':
-        return 'bn_IN';
-      case 'ur':
-        return 'ur_IN';
-      default:
-        return 'en_IN';
-    }
+  String _generateTempFilePath() {
+    final tempDir = Directory.systemTemp;
+    return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
   }
 
-  // Pick a supported STT locale
-  Future<String?> _chooseSupportedLocale(String preferred) async {
-    try {
-      final locales = await _speech.locales();
-      if (locales.isEmpty) return null;
-      final exact = locales.firstWhere(
-        (l) => l.localeId == preferred,
-        orElse: () => locales.first,
-      );
-      if (exact.localeId == preferred) return preferred;
-      final lang = preferred.split('_').first;
-      final byLang = locales.firstWhere(
-        (l) => l.localeId.startsWith(lang),
-        orElse: () => locales.first,
-      );
-      return byLang.localeId;
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<void> _startListening() async {
+    if (!await _recorder.hasPermission()) return;
 
-  int get _usersInMeetingCount {
-    final users = <String>{_myName};
-    for (var m in _messages) {
-      final user = m['user'];
-      if (user is String) users.add(user);
-    }
-    return users.length;
-  }
+    setState(() {
+      _isRecording = true;
+      _speakerIndex = 0;
+    });
+    _resetSilenceTimer();
 
-  void _onSpeechStatus(String status) {
-    if (_isDisposed) return;
-
-    if (status == 'notListening' || status == 'done') {
-      if (_sttFullyStopped != null && !_sttFullyStopped!.isCompleted) {
-        _sttFullyStopped!.complete();
-      }
-      if (!_isDisposed && mounted && _isRecording && !_identifyingNow) {
-        _startListening();
-      }
-    }
-  }
-
-  void _onSpeechError(SpeechRecognitionError error) {
-    if (_isDisposed || !mounted) return;
-
-    // For transient errors (e.g. timeout), don't stop the flow – just retry.
-    if (!error.permanent) {
-      setState(() => _amplitude = 0);
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (!_isDisposed && mounted && _isRecording && !_speech.isListening) {
-          _startListening();
-        }
+    _amplitudeTimer?.cancel();
+    _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 48), (_) {
+      if (!_isRecording) return;
+      setState(() {
+        _amplitude = 2200 + Random().nextInt(3400).toDouble();
       });
-      return;
-    }
+    });
 
-    // Permanent errors halt listening and inform the user.
+    _currentFilePath = _generateTempFilePath();
+    await _recorder.start(
+      RecordConfig(
+        encoder: AudioEncoder.wav,
+        bitRate: 256000,
+        sampleRate: 44100,
+        numChannels: 1,
+      ),
+      path: _currentFilePath!,
+    );
+
+
+
+    _continueRecordingCycle();
+  }
+
+  Future<void> _continueRecordingCycle() async {
+    while (_isRecording) {
+      await Future.delayed(const Duration(seconds: 5));
+      if (!_isRecording) break;
+
+      final String? stoppedPath = await _recorder.stop();
+      if (stoppedPath != null) {
+        final File audioFile = File(stoppedPath);
+        final label = _audioLabel++;
+        bool shouldSend = await _isAudioSignificant(audioFile);
+        if (shouldSend) {
+          _resetSilenceTimer();
+          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
+          _processAudioQueue();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("No voice detected, try again!"),
+              backgroundColor: Colors.orange.shade400,
+              duration: const Duration(milliseconds: 900),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+
+      if (!_isRecording) break;
+
+      _currentFilePath = _generateTempFilePath();
+      await _recorder.start(
+        RecordConfig(
+          encoder: AudioEncoder.wav,
+          bitRate: 256000,
+          sampleRate: 44100,
+          numChannels: 1,
+        ),
+        path: _currentFilePath!,
+      );
+    }
+  }
+
+  Future<bool> _isAudioSignificant(File file) async {
+    try {
+      if (!(await file.exists())) return false;
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 6000) return false;
+      if (bytes.length > 44) {
+        Uint8List pcm = bytes.sublist(44);
+        int silentCount = 0;
+        for (int i = 0; i < pcm.length; i += 2) {
+          int val = pcm[i] | (pcm[i + 1] << 8);
+          if (val.abs() < 300) silentCount++;
+        }
+        if (silentCount > (pcm.length ~/ 2 * 0.90)) return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _stopListening() async {
     setState(() {
       _isRecording = false;
       _amplitude = 0;
     });
-    _toast('Speech error: ${error.errorMsg} (permanent)');
-  }
+    _silenceTimer?.cancel();
+    _amplitudeTimer?.cancel();
 
-  Future<void> _startListening() async {
-    if (_isDisposed) return;
-    if (_identifyingNow) return;
-    if (_speech.isListening) return;
-
-    final available = await _speech.initialize(
-      onStatus: _onSpeechStatus,
-      onError: _onSpeechError,
-      debugLogging: false,
-    );
-    if (_isDisposed) return;
-    if (!available) {
-      _toast('Speech recognition not available on this device.');
-      return;
+    String? stoppedPath;
+    if (await _recorder.isRecording()) {
+      stoppedPath = await _recorder.stop();
+    } else if (_currentFilePath != null) {
+      stoppedPath = _currentFilePath;
     }
 
-    final preferred = _localeIdForLanguage(_appLanguageCode);
-    final chosenLocale = await _chooseSupportedLocale(preferred) ?? preferred;
-    if (_isDisposed) return;
-
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _isRecording = true;
-      });
-    }
-
-    _speech.listen(
-      onResult: _onSpeechResult,
-      listenMode: ListenMode.dictation,
-      localeId: chosenLocale,
-      partialResults: true,
-      listenFor: const Duration(hours: 1),
-      pauseFor: const Duration(seconds: 2),
-      cancelOnError: false,
-      onSoundLevelChange: (level) {
-        if (!mounted || _isDisposed) return;
-        setState(() {
-          // Clamp amplitude to avoid oversized UI vibrations.
-          _amplitude = (level * 1000).clamp(0, 120).toDouble();
-        });
-      },
-    );
-  }
-
-  Future<void> _stopListening() async {
-    if (_isDisposed) return;
-
-    _sttFullyStopped = Completer<void>();
-
-    try {
-      await _speech.stop();
-    } catch (_) {}
-
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _amplitude = 0;
-      });
-    }
-
-    try {
-      await _sttFullyStopped!.future.timeout(const Duration(milliseconds: 800));
-    } catch (_) {}
-    _sttFullyStopped = null;
-
-    await Future.delayed(const Duration(milliseconds: 120));
-  }
-
-  Future<String?> _recordShortSegment({int milliseconds = 1200}) async {
-    if (_isDisposed) return null;
-    if (_segRecording) return null;
-    _segRecording = true;
-    try {
-      final ok = await _segRec.hasPermission();
-      if (!ok) {
-        _toast('Microphone permission denied.');
-        return null;
-      }
-
-      final dir = await getTemporaryDirectory();
-      final path =
-          '${dir.path}/stt_seg_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-      const cfg = RecordConfig(
-        encoder: AudioEncoder.wav,
-        sampleRate: 16000,
-        numChannels: 1,
-        bitRate: 128000,
-      );
-
-      await _segRec.start(cfg, path: path);
-      await Future.delayed(Duration(milliseconds: milliseconds));
-      final saved = await _segRec.stop();
-      if (saved == null) {
-        _toast('No audio captured for speaker ID.');
-      }
-      return saved;
-    } catch (e) {
-      _toast('Record error: $e');
-      return null;
-    } finally {
-      _segRecording = false;
-    }
-  }
-
-  // Ensure there is a live (draft) message to update
-  void _ensureLiveMessage() {
-    if (_isDisposed) return;
-    if (_liveMsgIndex >= 0 &&
-        _liveMsgIndex < _messages.length &&
-        _messages[_liveMsgIndex]['final'] == false) {
-      return;
-    }
-    _messages.add({
-      'user': 'Speaking…', // placeholder until ID
-      'text': '',
-      'time': TimeOfDay.now().format(context),
-      'isMe': false,
-      'spoken': false,
-      'final': false, // mark as live
-      // diarization candidates for this message:
-      'cands': <Map<String, dynamic>>[],
-    });
-    _liveMsgIndex = _messages.length - 1;
-  }
-
-  // Helpers: normalize a candidate list for UI (≥ 20%)
-  List<Map<String, dynamic>> _filterUiCandidates(
-      List<Map<String, dynamic>> raw) {
-    final out = <Map<String, dynamic>>[];
-    for (final m in raw) {
-      final name = (m['name'] ?? '').toString();
-      final score = (m['score'] is num)
-          ? (m['score'] as num).toDouble().clamp(0.0, 1.0)
-          : 0.0;
-      if (name.isNotEmpty && score >= 0.20) {
-        out.add({'name': name, 'score': score});
-      }
-    }
-    out.sort((a, b) => (b['score'] as double).compareTo(a['score'] as double));
-    return out;
-  }
-
-  // Finalize the live message text and run ID
-  Future<void> _finalizeLiveMessage(String finalText) async {
-    if (_isDisposed) return;
-    if (_liveMsgIndex < 0 || _liveMsgIndex >= _messages.length) return;
-
-    // Mark text final first
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _messages[_liveMsgIndex]['text'] = finalText;
-        _messages[_liveMsgIndex]['final'] = true;
-      });
-    }
-
-    // === Sequential speaker ID ===
-    _idBusy = true;
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _identifyingNow = true;
-      });
-    }
-
-    // Pause STT and capture a small ID clip
-    await _stopListening();
-    await _flutterTts.stop();
-
-    String? bestName;
-    double bestScore = 0.0;
-    final allCands = <Map<String, dynamic>>[];
-
-    try {
-      final segPath = await _recordShortSegment(milliseconds: 1200);
-      if (segPath != null && !_isDisposed) {
-        final res = await _spkSvc.identifyScores(
-          segPath,
-          topK: 5,
-          includeBelowThreshold: true,
-        );
-
-        if (res.isNotEmpty) {
-          print('--- Speaker candidates ---');
-          for (final c in res) {
-            final name =
-                (c['id'] ?? c['name'] ?? c['speaker'] ?? c['label'] ?? '')
-                    .toString();
-            final scoreNum = c['score'] ??
-                c['confidence'] ??
-                c['prob'] ??
-                c['similarity'] ??
-                0.0;
-            final score =
-                (scoreNum is num) ? scoreNum.toDouble().clamp(0.0, 1.0) : 0.0;
-            print('  $name : ${(score * 100).toStringAsFixed(1)}%');
-            allCands.add({'name': name, 'score': score});
+    if (stoppedPath != null) {
+      final file = File(stoppedPath);
+      if (await file.exists()) {
+        int durationSec = await _getWavDurationSeconds(file);
+        if (durationSec <= 19 && durationSec >= 1) {
+          final label = _audioLabel++;
+          bool shouldSend = await _isAudioSignificant(file);
+          if (shouldSend) {
+            _resetSilenceTimer();
+            _audioQueue.add(_AudioQueueItem(file: file, label: label));
+            _processAudioQueue();
           }
-          final top = res.first;
-          bestName = (top['id'] ??
-                  top['name'] ??
-                  top['speaker'] ??
-                  top['label'] ??
-                  '')
-              .toString();
-          final sc = top['score'] ??
-              top['confidence'] ??
-              top['prob'] ??
-              top['similarity'] ??
-              0.0;
-          bestScore = (sc is num) ? sc.toDouble().clamp(0.0, 1.0) : 0.0;
-          print(
-              'Best match = $bestName @ ${(bestScore * 100).toStringAsFixed(1)}%');
-        } else {
-          print('No speaker candidates returned.');
-        }
-
-        if (allCands.isEmpty) {
-          // Fallback to simple API and still log the result
-          final n = await _spkSvc.identify(
-            segPath,
-            threshold: 0.74,
-            secondBestMargin: 0.035,
-            displayThreshold: 0.40,
-          );
-          if (n != null) {
-            bestName = n;
-            bestScore = 1.0;
-            allCands.add({'name': n, 'score': 1.0});
-          }
-          print(
-              'Best match (fallback) = ${bestName ?? "null"} @ ${(bestScore * 100).toStringAsFixed(1)}%');
         }
       }
-    } catch (e) {
-      _toast('Identify error: $e');
     }
-
-    if (_isDisposed) return;
-
-    // Only show a name if score >= 20%
-    final showName = (bestName ?? '').isNotEmpty && bestScore >= 0.20;
-    final detectedName = showName ? bestName! : 'Anonymous';
-    final isMe = detectedName == _myName;
-
-    // candidates (≥20%) for UI
-    final candsForUi = _filterUiCandidates(allCands);
-
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _messages[_liveMsgIndex]['user'] = detectedName;
-        _messages[_liveMsgIndex]['isMe'] = isMe;
-        _messages[_liveMsgIndex]['cands'] = candsForUi;
-        _currentSpeaker = showName ? detectedName : '';
-        _currentScore = bestScore;
-      });
-    }
-
-    // Log the final identified speaker and confidence to the terminal so
-    // developers can easily see who was matched for each utterance.
-    final percent = (bestScore * 100).toStringAsFixed(1);
-    if (showName) {
-      print('Identified speaker: $detectedName at $percent%');
-    } else {
-      print('Identified speaker: Anonymous (below threshold)');
-    }
-
-    // Persist
-    unawaited(_saveCurrentMeetingToFirestore());
-
-    // Speak my message if needed
-    if (_speakOnMeeting && isMe && !_isDisposed) {
-      await _speakMyLastMessage(finalText);
-    }
-
-    // Prepare for next live
-    _liveMsgIndex = -1;
-
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _identifyingNow = false;
-      });
-    }
-    _idBusy = false;
-
-    // Resume STT (only if still on screen)
-    if (mounted && !_isDisposed) _startListening();
+  }
+  Future<int> _getWavDurationSeconds(File file) async {
+    try {
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 44) return 0;
+      final byteRate = bytes.buffer.asByteData().getUint32(28, Endian.little);
+      final dataLen = bytes.length - 44;
+      if (byteRate > 0) return (dataLen ~/ byteRate).clamp(0, 1000);
+    } catch (_) {}
+    return 0;
   }
 
-  void _onSpeechResult(SpeechRecognitionResult result) async {
-    if (_isDisposed) return;
-    final text = result.recognizedWords.trim();
-    if (text.isEmpty) return;
 
-    // 1) Stream partials into a live bubble
-    _ensureLiveMessage();
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _messages[_liveMsgIndex]['text'] = text;
-        _messages[_liveMsgIndex]['time'] = TimeOfDay.now().format(context);
-      });
+  // Allow English and major Indian scripts so that Hindi or other
+  // Indian languages are not filtered out when app language is English.
+  bool _isTextInLanguage(String text, String languageCode) {
+    if (languageCode == 'en') {
+      final englishLetters =
+      text.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').replaceAll(' ', '');
+      final hasIndianChars = RegExp(
+          r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF'
+          r'\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF'
+          r'\u0D00-\u0D7F\u0D80-\u0DFF]'
+      ).hasMatch(text);
+      if (englishLetters.length > text.length * 0.6 || hasIndianChars) {
+        return true;
+      }
+      return false;
     }
-    if (_shouldAutoscroll) _scrollToBottom(animate: true);
+    return true;
+  }
 
-    // 2) If final, lock text, run ID, then resume
-    if (result.finalResult) {
-      await _finalizeLiveMessage(text);
-    }
+  void _resetSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceDuration, _handleSilenceTimeout);
+  }
+
+  void _handleSilenceTimeout() {
+    if (!_isRecording) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No voice detected'),
+        content: const Text(
+            'No voice detected for a while. Stop the conversation? You can start again when your meeting begins. Your meeting is saved.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _stopListening();
+            },
+            child: const Text('Stop'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resetSilenceTimer();
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _scrollToBottom({bool animate = true}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _isDisposed) return;
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: animate ? const Duration(milliseconds: 250) : Duration.zero,
+          duration: animate ? const Duration(milliseconds: 350) : Duration.zero,
           curve: Curves.easeOut,
         );
       }
     });
   }
 
+  void _processAudioQueue() async {
+    if (_isApiProcessing || _audioQueue.isEmpty) return;
+    _isApiProcessing = true;
+    while (_audioQueue.isNotEmpty) {
+      final item = _audioQueue.removeAt(0);
+      await _hitIdentifySpeaker(item.file, item.label);
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+    _isApiProcessing = false;
+  }
+
+  Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
+    final prefs = await SharedPreferences.getInstance();
+    final storedEmail = prefs.getString('email') ?? '';
+
+    final base = _showTextMyLanguage
+        ? ApiConstants.identifySpeakerNative
+        : ApiConstants.identifySpeaker;
+    Uri uri = Uri.parse('$base?email=$storedEmail&label=$label');
+    void showAccountDeletedDialog() {
+      showGeneralDialog(
+        context: context,
+        barrierDismissible: false,
+        barrierLabel: "accountDeleted",
+        pageBuilder: (ctx, _, __) => WillPopScope(
+          onWillPop: () async => false,
+          child: Container(
+            color: widget.isDarkMode ? Color(0xFF181A20) : Color(0xFFFCF6BA),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                child: Material(
+                  borderRadius: BorderRadius.circular(26),
+                  color: widget.isDarkMode
+                      ? Colors.blueGrey[900]!.withOpacity(0.98)
+                      : Colors.white.withOpacity(0.97),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(30),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.block_rounded,
+                          color: widget.isDarkMode
+                              ? Colors.cyanAccent
+                              : Colors.deepPurpleAccent,
+                          size: 55,
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          "Your account has been blocked",
+                          style: TextStyle(
+                            color: widget.isDarkMode
+                                ? Colors.cyanAccent
+                                : Colors.deepPurpleAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 22,
+                            letterSpacing: 1.1,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "For security reasons, your account was blocked by admin. Please contact our support team for assistance.",
+                          style: TextStyle(
+                            color: widget.isDarkMode
+                                ? Colors.white70
+                                : Colors.blueGrey.shade700,
+                            fontSize: 16,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 26),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: widget.isDarkMode
+                                ? Colors.cyanAccent.withOpacity(0.85)
+                                : Colors.deepPurpleAccent,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 38, vertical: 14),
+                          ),
+                          icon: Icon(
+                            Icons.support_agent_rounded,
+                            color: widget.isDarkMode ? Colors.black : Colors.white,
+                            size: 26,
+                          ),
+                          label: Text(
+                            "Contact Support",
+                            style: TextStyle(
+                                color: widget.isDarkMode
+                                    ? Colors.black
+                                    : Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 17.3),
+                          ),
+                          onPressed: () {
+                            context.go(Routes.login);
+                          },
+                        ),
+                        const SizedBox(height: 15),
+                        TextButton(
+                            onPressed: () {
+                              context.go(Routes.login);
+                            },
+                            child: Text(
+                              "Exit App",
+                              style: TextStyle(
+                                  color: widget.isDarkMode
+                                      ? Colors.cyanAccent
+                                      : Colors.deepPurpleAccent,
+                                  fontSize: 15.5,
+                                  fontWeight: FontWeight.bold),
+                            )
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    Future<http.StreamedResponse> sendRequest(Uri targetUri) {
+      final request = http.MultipartRequest('POST', targetUri)
+        ..files.add(
+          http.MultipartFile.fromBytes(
+            'audio_file',
+            audioFile.readAsBytesSync(),
+            filename: audioFile.path.split('/').last,
+            contentType: MediaType('audio', 'wav'),
+          ),
+        );
+      return request.send();
+    }
+
+    try {
+      http.StreamedResponse streamed = await sendRequest(uri);
+      http.Response response = await http.Response.fromStream(streamed);
+
+      if (response.statusCode == 307 || response.statusCode == 302) {
+        final location = streamed.headers['location'];
+        if (location != null) {
+          uri = Uri.parse(location);
+          streamed = await sendRequest(uri);
+          response = await http.Response.fromStream(streamed);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Redirect without Location header'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+          return;
+        }
+      }
+      if (response.statusCode == 204) {
+        await Future.delayed(const Duration(milliseconds: 600));
+        if (mounted) showAccountDeletedDialog();
+        setState(() {
+        });
+        return;
+      }
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final speakers = body['speakers'] as List<dynamic>;
+
+        setState(() {
+          for (var speakerEntry in speakers) {
+            final key = (speakerEntry as Map<String, dynamic>).keys.first;
+            final data = speakerEntry[key] as Map<String, dynamic>;
+            final name = data['name'] as String? ?? 'Unknown';
+            final text = data['spoken_text'] as String? ?? '';
+            final time = TimeOfDay.now().format(context);
+
+            if (text.trim().isEmpty) {
+              continue;
+            }
+            if (!_showTextMyLanguage &&
+                !_isTextInLanguage(text, _appLanguageCode)) {
+              continue;
+            }
+
+            _messages.add({
+              'user': name,
+              'text': text,
+              'time': time,
+              'isMe': false,
+              'spoken': false,
+              'audioLabel': label,
+            });
+            _latestSentence = text;
+            _latestSentenceTimer?.cancel();
+            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+              setState(() {
+                _latestSentence = '';
+              });
+            });
+            _speakerIndex++;
+          }
+        });
+
+        await _saveCurrentMeetingToFirestore();
+        if (_shouldAutoscroll) _scrollToBottom(animate: true);
+      } else {
+        final errorBody = response.body.isNotEmpty
+            ? response.body
+            : 'No error message from API';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('API error ${response.statusCode}: $errorBody'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to call API: $e'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _sendTextMessage() async {
-    if (_isDisposed) return;
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
 
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _messages.add({
-          'user': _myName,
-          'text': msg,
-          'time': TimeOfDay.now().format(context),
-          'isMe': true,
-          'spoken': false,
-          'final': true,
-          'cands': <Map<String, dynamic>>[],
-        });
-        _textController.clear();
+    setState(() {
+      _messages.add({
+        'user': _myName,
+        'text': msg,
+        'time': TimeOfDay.now().format(context),
+        'isMe': true,
+        'spoken': false,
       });
-    }
-    unawaited(_saveCurrentMeetingToFirestore());
-    if (_speakOnMeeting && !_isDisposed) {
+      _textController.clear();
+      _latestSentence = msg;
+      _latestSentenceTimer?.cancel();
+      _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+        setState(() {
+          _latestSentence = '';
+        });
+      });
+    });
+
+    await _saveCurrentMeetingToFirestore();
+    await Future.delayed(const Duration(milliseconds: 120));
+    if (_speakOnMeeting) {
       await _speakMyLastMessage(msg);
     }
 
@@ -687,22 +671,27 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 
   Future<void> _speakMyLastMessage(String msg) async {
-    if (_isDisposed) return;
-    int lastIndex = _messages.lastIndexWhere((m) =>
-        m['isMe'] == true &&
-        m['text'] == msg &&
-        (m['spoken'] == false || m['spoken'] == null));
+    int lastIndex = _messages.lastIndexWhere(
+            (m) => m['isMe'] == true && m['text'] == msg && m['spoken'] == false);
     if (lastIndex == -1) return;
     await _flutterTts.speak(msg);
 
-    if (!mounted || _isDisposed) return;
     setState(() {
       _messages[lastIndex]['spoken'] = true;
     });
   }
 
+  Future<void> _replaySpeak(int index) async {
+    final msg = _messages[index]['text'] ?? '';
+    if (msg.isNotEmpty) {
+      await _flutterTts.speak(msg);
+      setState(() {
+        _messages[index]['spoken'] = true;
+      });
+    }
+  }
+
   Future<void> _saveCurrentMeetingToFirestore() async {
-    if (_isDisposed) return;
     if (_savingHistory) return;
     _savingHistory = true;
     final prefs = await SharedPreferences.getInstance();
@@ -725,11 +714,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _savingHistory = false;
   }
 
-  void _toast(String msg) {
-    if (!mounted || _isDisposed) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
-
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -737,26 +721,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     final double micSize = 55;
 
     final gradientColors = widget.isDarkMode
-        ? [
-            const Color(0xFF181A20),
-            const Color(0xFF232526),
-            const Color(0xFF181A20)
-          ]
-        : [
-            const Color(0xFF0093E9),
-            const Color(0xFF80D0C7),
-            const Color(0xFFFCF6BA)
-          ];
+        ? [const Color(0xFF181A20), const Color(0xFF232526), const Color(0xFF181A20)]
+        : [const Color(0xFF0093E9), const Color(0xFF80D0C7), const Color(0xFFFCF6BA)];
 
     final textPrimary = widget.isDarkMode ? Colors.white : Colors.black;
-    final textSecondary = widget.isDarkMode
-        ? Colors.white70
-        : Colors.blueGrey.shade900.withOpacity(0.6);
-    final chatInputColor = widget.isDarkMode
-        ? Colors.blueGrey.shade900.withOpacity(0.6)
-        : Colors.white;
-    final sendBtnColor =
-        widget.isDarkMode ? Colors.cyanAccent : Colors.blueAccent;
+    final textSecondary = widget.isDarkMode ? Colors.white70 : Colors.blueGrey.shade900.withOpacity(0.6);
+    final chatInputColor = widget.isDarkMode ? Colors.blueGrey.shade900.withOpacity(0.6) : Colors.white;
+    final sendBtnColor = widget.isDarkMode ? Colors.cyanAccent : Colors.blueAccent;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -765,6 +736,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
+
         title: ShaderMask(
           shaderCallback: (rect) => LinearGradient(
             colors: widget.isDarkMode
@@ -800,14 +772,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
                   colors: widget.isDarkMode
-                      ? [
-                          Colors.cyanAccent.withOpacity(0.14),
-                          Colors.blueAccent.withOpacity(0.13)
-                        ]
-                      : [
-                          Colors.deepPurpleAccent.withOpacity(0.11),
-                          Colors.amber.withOpacity(0.14)
-                        ],
+                      ? [Colors.cyanAccent.withOpacity(0.14), Colors.blueAccent.withOpacity(0.13)]
+                      : [Colors.deepPurpleAccent.withOpacity(0.11), Colors.amber.withOpacity(0.14)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -824,9 +790,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
               child: IconButton(
                 icon: Icon(
                   Icons.history_edu_rounded,
-                  color: widget.isDarkMode
-                      ? Colors.cyanAccent
-                      : Colors.deepPurpleAccent,
+                  color: widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
                   size: 27,
                   shadows: [
                     Shadow(
@@ -838,12 +802,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                   ],
                 ),
                 onPressed: () {
-                  if (_isDisposed) return;
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => MeetingHistoryScreen(
                         isDark: widget.isDarkMode,
+                        userColors: _userColors,
                       ),
                     ),
                   );
@@ -861,14 +825,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                 borderRadius: BorderRadius.circular(16),
                 gradient: LinearGradient(
                   colors: widget.isDarkMode
-                      ? [
-                          Colors.cyanAccent.withOpacity(0.14),
-                          Colors.blueAccent.withOpacity(0.13)
-                        ]
-                      : [
-                          Colors.deepPurpleAccent.withOpacity(0.11),
-                          Colors.amber.withOpacity(0.14)
-                        ],
+                      ? [Colors.cyanAccent.withOpacity(0.14), Colors.blueAccent.withOpacity(0.13)]
+                      : [Colors.deepPurpleAccent.withOpacity(0.11), Colors.amber.withOpacity(0.14)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -888,8 +846,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                   color: _showTextMyLanguage
                       ? Colors.greenAccent
                       : widget.isDarkMode
-                          ? Colors.cyanAccent
-                          : Colors.deepPurpleAccent,
+                      ? Colors.cyanAccent
+                      : Colors.deepPurpleAccent,
                   size: 27,
                   shadows: [
                     Shadow(
@@ -913,16 +871,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                 ? Colors.white.withOpacity(0.09)
                 : Colors.blue.shade50.withOpacity(0.9),
             child: IconButton(
-              icon: Icon(Icons.arrow_back,
-                  color: widget.isDarkMode ? Colors.white : Colors.black),
+              icon: Icon(Icons.arrow_back, color: widget.isDarkMode ? Colors.white : Colors.black),
               onPressed: () {
-                if (_isDisposed) return;
                 context.pop();
               },
             ),
           ),
         ),
       ),
+
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -940,17 +897,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
               Column(
                 children: [
                   const SizedBox(height: 20),
-                  Text(
-                    'Users in meeting: $_usersInMeetingCount',
-                    style: TextStyle(
-                      color: widget.isDarkMode
-                          ? Colors.cyanAccent
-                          : Colors.deepPurpleAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -961,9 +907,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                         decoration: BoxDecoration(
                           color: _isRecording
                               ? Colors.redAccent
-                              : widget.isDarkMode
-                                  ? Colors.grey.shade800
-                                  : Colors.grey.shade400,
+                              : widget.isDarkMode ? Colors.grey.shade800 : Colors.grey.shade400,
                           shape: BoxShape.circle,
                           boxShadow: [
                             if (_isRecording)
@@ -977,34 +921,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        _isRecording
-                            ? context.loc.listening
-                            : context.loc.tapMicToStart,
+                        _isRecording ? context.loc.listening : context.loc.tapMicToStart,
                         style: TextStyle(
-                          color:
-                              widget.isDarkMode ? Colors.white : Colors.black87,
+                          color: textPrimary.withOpacity(0.86),
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.2,
                           shadows: [
-                            Shadow(
-                                color: widget.isDarkMode
-                                    ? Colors.black87
-                                    : Colors.black12,
-                                blurRadius: 5)
+                            Shadow(color: widget.isDarkMode ? Colors.black87 : Colors.black12, blurRadius: 5)
                           ],
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      if (_currentSpeaker.isNotEmpty) ...[
-                        const SizedBox(width: 10),
-                        Chip(
-                          avatar: const Icon(Icons.person, size: 16),
-                          label: Text(
-                            '$_currentSpeaker ${((_currentScore * 100).toStringAsFixed(0))}%',
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                   Expanded(
@@ -1015,274 +943,199 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                       },
                       child: _messages.isEmpty
                           ? Center(
-                              child: Text(
-                                context.loc.noConversationYet,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: textSecondary,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
+                        child: Text(
+                          context.loc.noConversationYet,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textSecondary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      )
+                          : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.only(
+                            bottom: 80, left: 16, right: 16, top: 16),
+                        reverse: false,
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = _messages[index];
+                          final isMe = msg['isMe'] ?? false;
+                          final spoken = msg['spoken'] ?? false;
+                          final color = isMe
+                              ? (widget.isDarkMode ? Colors.blue : Colors.deepPurpleAccent)
+                              : _userColors[index % _userColors.length];
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 360),
+                              margin: const EdgeInsets.symmetric(vertical: 7),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 10, horizontal: 15),
+                              constraints: BoxConstraints(
+                                maxWidth: size.width * 0.78,
+                              ),
+                              decoration: isMe
+                                  ? BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: widget.isDarkMode
+                                      ? [Colors.blueGrey.shade900, Colors.blueGrey.shade800]
+                                      : [Color(0xFF1E88E5), Color(0xFF5AC8FA)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(22),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: widget.isDarkMode
+                                        ? Colors.black.withOpacity(0.18)
+                                        : Color(0xFF1E88E5).withOpacity(0.18),
+                                    blurRadius: 18,
+                                    offset: const Offset(1, 4),
+                                  )
+                                ],
+                              )
+                                  : BoxDecoration(
+                                color: color.withOpacity(widget.isDarkMode ? 0.21 : 0.14),
+                                borderRadius: BorderRadius.circular(19),
+                                border: Border.all(
+                                  color: color.withOpacity(0.18),
+                                  width: 1,
                                 ),
                               ),
-                            )
-                          : ListView.builder(
-                              controller: _scrollController,
-                              padding: const EdgeInsets.only(
-                                  bottom: 80, left: 16, right: 16, top: 16),
-                              reverse: false,
-                              itemCount: _messages.length,
-                              itemBuilder: (context, index) {
-                                final msg = _messages[index];
-                                final isMe = msg['isMe'] ?? false;
-                                final spoken = msg['spoken'] ?? false;
-                                final color = isMe
-                                    ? (widget.isDarkMode
-                                        ? Colors.blue
-                                        : Colors.deepPurpleAccent)
-                                    : _myColor;
-                                final isLive = msg['final'] == false;
-                                final List<Map<String, dynamic>> cands =
-                                    List<Map<String, dynamic>>.from(
-                                        msg['cands'] ?? const []);
-
-                                return Align(
-                                  alignment: isMe
-                                      ? Alignment.centerRight
-                                      : Alignment.centerLeft,
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 300),
-                                    margin:
-                                        const EdgeInsets.symmetric(vertical: 7),
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 10, horizontal: 15),
-                                    constraints: BoxConstraints(
-                                      maxWidth: size.width * 0.78,
-                                    ),
-                                    decoration: isMe
-                                        ? BoxDecoration(
-                                            gradient: LinearGradient(
-                                              colors: widget.isDarkMode
-                                                  ? [
-                                                      Colors.blueGrey.shade900,
-                                                      Colors.blueGrey.shade800
-                                                    ]
-                                                  : [
-                                                      Color(0xFF1E88E5),
-                                                      Color(0xFF5AC8FA)
-                                                    ],
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                            ),
-                                            borderRadius:
-                                                BorderRadius.circular(22),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: widget.isDarkMode
-                                                    ? Colors.black
-                                                        .withOpacity(0.18)
-                                                    : Color(0xFF1E88E5)
-                                                        .withOpacity(0.18),
-                                                blurRadius: 18,
-                                                offset: const Offset(1, 4),
-                                              )
-                                            ],
-                                          )
-                                        : BoxDecoration(
-                                            color: color.withOpacity(
-                                                widget.isDarkMode
-                                                    ? 0.21
-                                                    : 0.14),
-                                            borderRadius:
-                                                BorderRadius.circular(19),
-                                            border: Border.all(
-                                              color: color.withOpacity(0.18),
-                                              width: 1,
-                                            ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Wrap(
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    spacing: 8,
+                                    runSpacing: 2,
+                                    children: [
+                                      CircleAvatar(
+                                        backgroundColor: color,
+                                        radius: 14,
+                                        child: Text(
+                                          (msg['user'] as String)[0].toUpperCase(),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
                                           ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Wrap(
-                                          crossAxisAlignment:
-                                              WrapCrossAlignment.center,
-                                          spacing: 8,
-                                          runSpacing: 2,
-                                          children: [
-                                            CircleAvatar(
-                                              backgroundColor: color,
-                                              radius: 14,
-                                              child: Text(
-                                                (msg['user'] as String)[0]
-                                                    .toUpperCase(),
-                                                style: const TextStyle(
-                                                  color: Colors.white,
+                                        ),
+                                      ),
+                                      Text(
+                                        isMe
+                                            ? _myName
+                                            : msg['user'] as String,
+                                        style: TextStyle(
+                                          color: isMe
+                                              ? Colors.white
+                                              : color,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      if (isMe)
+                                        _speakOnMeeting
+                                            ? spoken
+                                            ? Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(0.23),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.volume_up_rounded,
+                                                  size: 15, color: Colors.blue),
+                                              const SizedBox(width: 2),
+                                              const Text(
+                                                'Spoken',
+                                                style: TextStyle(
+                                                  color: Colors.blue,
+                                                  fontSize: 11,
                                                   fontWeight: FontWeight.bold,
                                                 ),
                                               ),
-                                            ),
-                                            Text(
-                                              isMe
-                                                  ? _myName
-                                                  : msg['user'] as String,
-                                              style: TextStyle(
-                                                color:
-                                                    isMe ? Colors.white : color,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 16,
+                                              IconButton(
+                                                padding: const EdgeInsets.only(left: 2, right: 2),
+                                                constraints: const BoxConstraints(),
+                                                tooltip: 'Speak again',
+                                                icon: const Icon(Icons.replay_circle_filled,
+                                                    size: 18,
+                                                    color: Colors.blueAccent),
+                                                onPressed: () => _replaySpeak(index),
                                               ),
-                                            ),
-                                            if (isLive)
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.amber
-                                                      .withOpacity(0.15),
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: const [
-                                                    Icon(Icons.circle,
-                                                        size: 10,
-                                                        color:
-                                                            Colors.redAccent),
-                                                    SizedBox(width: 6),
-                                                    Text('Live',
-                                                        style: TextStyle(
-                                                            fontSize: 11,
-                                                            fontWeight:
-                                                                FontWeight
-                                                                    .bold)),
-                                                  ],
-                                                ),
-                                              )
-                                            else if (isMe && _speakOnMeeting)
-                                              spoken
-                                                  ? Container(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                          horizontal: 8,
-                                                          vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white
-                                                            .withOpacity(0.23),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(8),
-                                                      ),
-                                                      child: Row(
-                                                        mainAxisSize:
-                                                            MainAxisSize.min,
-                                                        children: const [
-                                                          Icon(
-                                                              Icons
-                                                                  .volume_up_rounded,
-                                                              size: 15,
-                                                              color:
-                                                                  Colors.blue),
-                                                          SizedBox(width: 2),
-                                                          Text('Spoken',
-                                                              style: TextStyle(
-                                                                  color: Colors
-                                                                      .blue,
-                                                                  fontSize: 11,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold)),
-                                                        ],
-                                                      ),
-                                                    )
-                                                  : const SizedBox.shrink(),
-                                            Text(
-                                              msg['time'] as String,
-                                              style: TextStyle(
-                                                color: isMe
-                                                    ? Colors.white
-                                                        .withOpacity(0.88)
-                                                    : widget.isDarkMode
-                                                        ? Colors.white54
-                                                        : Colors.blueGrey,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          msg['text'] as String,
-                                          style: TextStyle(
-                                            color: isMe
-                                                ? Colors.white
-                                                : widget.isDarkMode
-                                                    ? Colors.white70
-                                                    : Colors.blueGrey[900],
-                                            fontSize: 17.5,
-                                            fontWeight: FontWeight.w500,
-                                            letterSpacing: 0.1,
-                                          ),
-                                        ),
-
-                                        // SHOW CANDIDATES (diarization) for finalized messages
-                                        if (!isLive && cands.isNotEmpty) ...[
-                                          const SizedBox(height: 10),
-                                          Wrap(
-                                            spacing: 6,
-                                            runSpacing: 6,
-                                            children: [
-                                              for (int i = 0;
-                                                  i < cands.length;
-                                                  i++)
-                                                _CandidateChip(
-                                                  name: cands[i]['name']
-                                                      as String,
-                                                  percent: ((cands[i]['score']
-                                                          as double) *
-                                                      100.0),
-                                                  highlight: i == 0, // top-1
-                                                  dark: widget.isDarkMode,
-                                                ),
                                             ],
                                           ),
-                                        ],
-                                      ],
+                                        )
+                                            : const SizedBox.shrink()
+                                            : IconButton(
+                                          icon: Icon(Icons.play_circle_fill_rounded,
+                                              color: Colors.deepPurpleAccent, size: 26),
+                                          tooltip: "Tap to play this message",
+                                          onPressed: () => _replaySpeak(index),
+                                        ),
+                                      Text(
+                                        msg['time'] as String,
+                                        style: TextStyle(
+                                          color: isMe
+                                              ? Colors.white.withOpacity(0.88)
+                                              : widget.isDarkMode
+                                              ? Colors.white54
+                                              : Colors.blueGrey,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    msg['text'] as String,
+                                    style: TextStyle(
+                                      color: isMe
+                                          ? Colors.white
+                                          : widget.isDarkMode
+                                          ? Colors.white70
+                                          : Colors.blueGrey[900],
+                                      fontSize: 17.5,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 0.1,
                                     ),
                                   ),
-                                );
-                              },
+                                ],
+                              ),
                             ),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ],
               ),
-
-              // “Identifying…” overlay during mic handoff
-              if (_identifyingNow)
-                Positioned(
-                  top: 12,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Identifying speaker…',
-                        style: TextStyle(color: Colors.white),
+              if (_latestSentence.isNotEmpty)
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _latestSentence,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
                 ),
-
               if (_showScrollDownBtn && _messages.isNotEmpty)
                 Positioned(
                   bottom: 90,
@@ -1292,7 +1145,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                     child: GestureDetector(
                       onTap: () {
                         _scrollToBottom();
-                        if (!mounted || _isDisposed) return;
                         setState(() {
                           _showScrollDownBtn = false;
                           _shouldAutoscroll = true;
@@ -1310,19 +1162,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                             ),
                           ],
                         ),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 9),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: const [
-                            Icon(Icons.arrow_downward,
-                                color: Colors.white, size: 22),
+                            Icon(Icons.arrow_downward, color: Colors.white, size: 22),
                             SizedBox(width: 6),
-                            Text("New message",
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold)),
+                            Text("New message", style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ),
@@ -1425,21 +1271,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                 : const AlwaysStoppedAnimation(1.0),
                             child: GestureDetector(
                               onTap: () {
-                                if (_isDisposed) return;
                                 if (_isRecording) {
-                                  // user turns OFF the mic
-                                  if (mounted) {
-                                    setState(() => _isRecording = false);
-                                  }
                                   _stopListening();
                                 } else {
-                                  // user turns ON the mic (continuous)
-                                  if (!_speech.isListening) {
-                                    _startListening();
-                                  }
-                                  if (mounted) {
-                                    setState(() => _isRecording = true);
-                                  }
+                                  _startListening();
                                   _micGlowController.forward(from: 0.97);
                                 }
                               },
@@ -1450,16 +1285,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                   shape: BoxShape.circle,
                                   gradient: LinearGradient(
                                     colors: _isRecording
-                                        ? [Colors.red, Colors.deepOrange]
+                                        ? [
+                                      Colors.red,
+                                      Colors.deepOrange,
+                                    ]
                                         : widget.isDarkMode
-                                            ? [
-                                                Colors.deepPurple,
-                                                Colors.cyanAccent
-                                              ]
-                                            : [
-                                                Color(0xFF8E54E9),
-                                                Color(0xFF50E3C2)
-                                              ],
+                                        ? [Colors.deepPurple, Colors.cyanAccent]
+                                        : [Color(0xFF8E54E9), Color(0xFF50E3C2)],
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
                                   ),
@@ -1468,10 +1300,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                       color: _isRecording
                                           ? Colors.cyanAccent.withOpacity(0.18)
                                           : widget.isDarkMode
-                                              ? Colors.cyanAccent
-                                                  .withOpacity(0.12)
-                                              : Colors.deepPurpleAccent
-                                                  .withOpacity(0.07),
+                                          ? Colors.cyanAccent.withOpacity(0.12)
+                                          : Colors.deepPurpleAccent.withOpacity(0.07),
                                       blurRadius: 18,
                                       spreadRadius: 4,
                                     ),
@@ -1501,81 +1331,24 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   }
 }
 
-class _CandidateChip extends StatelessWidget {
-  final String name;
-  final double percent;
-  final bool highlight;
-  final bool dark;
-
-  const _CandidateChip({
-    Key? key,
-    required this.name,
-    required this.percent,
-    required this.highlight,
-    required this.dark,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = highlight
-        ? (dark
-            ? Colors.cyanAccent.withOpacity(0.22)
-            : Colors.deepPurpleAccent.withOpacity(0.18))
-        : (dark ? Colors.white.withOpacity(0.08) : Colors.black12);
-    final border = highlight
-        ? (dark
-            ? Colors.cyanAccent.withOpacity(0.45)
-            : Colors.deepPurpleAccent.withOpacity(0.45))
-        : (dark ? Colors.white24 : Colors.black26);
-    final fg = highlight
-        ? (dark ? Colors.cyanAccent : Colors.deepPurpleAccent)
-        : (dark ? Colors.white70 : Colors.black87);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: border, width: 1.2),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(highlight ? Icons.verified : Icons.person, size: 16, color: fg),
-          const SizedBox(width: 6),
-          Text(
-            '$name  ${percent.toStringAsFixed(0)}%',
-            style: TextStyle(
-              color: fg,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+class _AudioQueueItem {
+  final File file;
+  final int label;
+  _AudioQueueItem({required this.file, required this.label});
 }
+
 
 class MeetingHistoryScreen extends StatelessWidget {
   final bool isDark;
-
-  const MeetingHistoryScreen({Key? key, required this.isDark})
-      : super(key: key);
+  final List<Color> userColors;
+  const MeetingHistoryScreen({Key? key, required this.isDark, required this.userColors}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     final firestore = FirebaseFirestore.instance;
     final bgColors = isDark
-        ? [
-            const Color(0xFF232526),
-            const Color(0xFF181A20),
-            const Color(0xFF232526)
-          ]
-        : [
-            const Color(0xFF0093E9),
-            const Color(0xFF80D0C7),
-            const Color(0xFFFCF6BA)
-          ];
+        ? [const Color(0xFF232526), const Color(0xFF181A20), const Color(0xFF232526)]
+        : [const Color(0xFF0093E9), const Color(0xFF80D0C7), const Color(0xFFFCF6BA)];
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -1616,8 +1389,7 @@ class MeetingHistoryScreen extends StatelessWidget {
                 ? Colors.white.withOpacity(0.09)
                 : Colors.blue.shade50.withOpacity(0.9),
             child: IconButton(
-              icon: Icon(Icons.arrow_back,
-                  color: isDark ? Colors.white : Colors.black),
+              icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.black),
               onPressed: () {
                 context.pop();
               },
@@ -1625,473 +1397,307 @@ class MeetingHistoryScreen extends StatelessWidget {
           ),
         ),
       ),
-      body: Stack(children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: bgColors,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+      body: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: bgColors,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
             ),
           ),
-        ),
-        if (!isDark)
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              color: Colors.white.withOpacity(0.08),
+          if (!isDark)
+            BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
+                color: Colors.white.withOpacity(0.08),
+              ),
             ),
-          ),
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: FutureBuilder<SharedPreferences>(
-              future: SharedPreferences.getInstance(),
-              builder: (context, prefsSnapshot) {
-                if (!prefsSnapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final email = prefsSnapshot.data!.getString('email') ?? '';
-                final meetingsRef = firestore
-                    .collection('meeting_histories')
-                    .doc('user_$email')
-                    .collection('meetings')
-                    .orderBy('timestamp', descending: true);
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: FutureBuilder<SharedPreferences>(
+                future: SharedPreferences.getInstance(),
+                builder: (context, prefsSnapshot) {
+                  if (!prefsSnapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final email = prefsSnapshot.data!.getString('email') ?? '';
+                  final meetingsRef = firestore
+                      .collection('meeting_histories')
+                      .doc('user_$email')
+                      .collection('meetings')
+                      .orderBy('timestamp', descending: true);
 
-                return StreamBuilder<QuerySnapshot>(
-                  stream: meetingsRef.snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData)
-                      return const Center(child: CircularProgressIndicator());
-                    final docs = snapshot.data!.docs;
-                    if (docs.isEmpty) {
-                      return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.forum_rounded,
-                                color: isDark
-                                    ? Colors.cyanAccent
-                                    : Colors.deepPurpleAccent,
-                                size: 66),
-                            const SizedBox(height: 10),
-                            ShaderMask(
-                              shaderCallback: (rect) => LinearGradient(
-                                colors: isDark
-                                    ? [Colors.cyanAccent, Colors.white]
-                                    : [Colors.deepPurple, Colors.amber],
-                              ).createShader(rect),
-                              child: Text(
-                                "No meetings yet.\nLet's talk!",
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 20,
-                                    letterSpacing: 0.3),
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: meetingsRef.snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                      final docs = snapshot.data!.docs;
+                      if (docs.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.forum_rounded, color: isDark ? Colors.cyanAccent : Colors.deepPurpleAccent, size: 66),
+                              const SizedBox(height: 10),
+                              ShaderMask(
+                                shaderCallback: (rect) => LinearGradient(
+                                  colors: isDark
+                                      ? [Colors.cyanAccent, Colors.white]
+                                      : [Colors.deepPurple, Colors.amber],
+                                ).createShader(rect),
+                                child: Text(
+                                  "No meetings yet.\nLet's talk!",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 20,
+                                      letterSpacing: 0.3),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                    return ListView.separated(
-                      itemCount: docs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 18),
-                      itemBuilder: (_, i) {
-                        final data = docs[i].data() as Map<String, dynamic>;
-                        final messages = List<Map<String, dynamic>>.from(
-                            data['messages'] ?? []);
-                        final dt = DateTime.fromMillisecondsSinceEpoch(
-                            data['timestamp'] ?? 0);
+                            ],
+                          ),
+                        );
+                      }
+                      return ListView.separated(
+                        itemCount: docs.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+                        itemBuilder: (_, i) {
+                          final data = docs[i].data() as Map<String, dynamic>;
+                          final messages = List<Map<String, dynamic>>.from(data['messages'] ?? []);
+                          final dt = DateTime.fromMillisecondsSinceEpoch(data['timestamp'] ?? 0);
 
-                        return AnimatedContainer(
-                          duration: Duration(milliseconds: 320 + (i * 25)),
-                          curve: Curves.easeInOut,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                              child: Card(
-                                color: isDark
-                                    ? Colors.white.withOpacity(0.06)
-                                    : Colors.white.withOpacity(0.83),
-                                elevation: 8,
-                                shadowColor: isDark
-                                    ? Colors.cyanAccent.withOpacity(0.11)
-                                    : Colors.amber.withOpacity(0.13),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                    side: BorderSide(
-                                      width: 1.5,
-                                      color: isDark
-                                          ? Colors.cyanAccent.withOpacity(0.12)
-                                          : Colors.deepPurpleAccent
-                                              .withOpacity(0.09),
-                                    )),
-                                child: Theme(
-                                  data: Theme.of(context).copyWith(
-                                    dividerColor: Colors.transparent,
-                                    splashColor: Colors.amber.withOpacity(0.09),
+                          return AnimatedContainer(
+                            duration: Duration(milliseconds: 320 + (i * 25)),
+                            curve: Curves.easeInOut,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                                child: Card(
+                                  color: isDark ? Colors.white.withOpacity(0.06) : Colors.white.withOpacity(0.83),
+                                  elevation: 8,
+                                  shadowColor: isDark ? Colors.cyanAccent.withOpacity(0.11) : Colors.amber.withOpacity(0.13),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                      side: BorderSide(
+                                        width: 1.5,
+                                        color: isDark
+                                            ? Colors.cyanAccent.withOpacity(0.12)
+                                            : Colors.deepPurpleAccent.withOpacity(0.09),
+                                      )
                                   ),
-                                  child: ExpansionTile(
-                                    initiallyExpanded: i == 0,
-                                    collapsedBackgroundColor:
-                                        Colors.transparent,
-                                    backgroundColor: Colors.transparent,
-                                    title: ShaderMask(
-                                      shaderCallback: (rect) => LinearGradient(
-                                        colors: isDark
-                                            ? [Colors.cyanAccent, Colors.white]
-                                            : [
-                                                Colors.deepPurple,
-                                                Colors.indigo,
-                                                Colors.amber
-                                              ],
-                                      ).createShader(rect),
-                                      child: Text(
-                                        data['title'] ?? context.loc.groupChat,
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 18,
-                                          letterSpacing: 0.6,
-                                          shadows: [
-                                            Shadow(
-                                                color: isDark
-                                                    ? Colors.cyanAccent
-                                                        .withOpacity(0.16)
-                                                    : Colors.deepPurpleAccent
-                                                        .withOpacity(0.15),
-                                                blurRadius: 7,
-                                                offset: Offset(1, 2))
-                                          ],
-                                        ),
-                                      ),
+                                  child: Theme(
+                                    data: Theme.of(context).copyWith(
+                                      dividerColor: Colors.transparent,
+                                      splashColor: Colors.amber.withOpacity(0.09),
                                     ),
-                                    subtitle: Row(
-                                      children: [
-                                        Icon(Icons.calendar_today,
-                                            size: 16,
-                                            color: isDark
-                                                ? Colors.white60
-                                                : Colors.blueGrey),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} @ "
-                                          "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}",
+                                    child: ExpansionTile(
+                                      initiallyExpanded: i == 0,
+                                      collapsedBackgroundColor: Colors.transparent,
+                                      backgroundColor: Colors.transparent,
+                                      title: ShaderMask(
+                                        shaderCallback: (rect) => LinearGradient(
+                                          colors: isDark
+                                              ? [Colors.cyanAccent, Colors.white]
+                                              : [Colors.deepPurple, Colors.indigo, Colors.amber],
+                                        ).createShader(rect),
+                                        child: Text(
+                                          data['title'] ?? context.loc.groupChat,
                                           style: TextStyle(
-                                            color: isDark
-                                                ? Colors.white60
-                                                : Colors.blueGrey,
-                                            fontSize: 14.5,
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 18,
+                                            letterSpacing: 0.6,
+                                            shadows: [
+                                              Shadow(
+                                                  color: isDark ? Colors.cyanAccent.withOpacity(0.16) : Colors.deepPurpleAccent.withOpacity(0.15),
+                                                  blurRadius: 7,
+                                                  offset: Offset(1, 2)
+                                              )
+                                            ],
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                    children: [
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                            bottom: 13,
-                                            left: 12,
-                                            right: 12,
-                                            top: 3),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 3),
-                                              child: ShaderMask(
-                                                shaderCallback: (rect) =>
-                                                    LinearGradient(
-                                                  colors: isDark
-                                                      ? [
-                                                          Colors.cyanAccent,
-                                                          Colors.white
-                                                        ]
-                                                      : [
-                                                          Colors.deepPurple,
-                                                          Colors.amber
-                                                        ],
-                                                ).createShader(rect),
-                                                child: Text(
-                                                  context.loc.conversation,
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 15.8,
-                                                    letterSpacing: 0.5,
+                                      ),
+                                      subtitle: Row(
+                                        children: [
+                                          Icon(Icons.calendar_today, size: 16, color: isDark ? Colors.white60 : Colors.blueGrey),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} @ "
+                                                "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}",
+                                            style: TextStyle(
+                                              color: isDark ? Colors.white60 : Colors.blueGrey,
+                                              fontSize: 14.5,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(bottom: 13, left: 12, right: 12, top: 3),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Padding(
+                                                padding: const EdgeInsets.symmetric(vertical: 3),
+                                                child: ShaderMask(
+                                                  shaderCallback: (rect) => LinearGradient(
+                                                    colors: isDark
+                                                        ? [Colors.cyanAccent, Colors.white]
+                                                        : [Colors.deepPurple, Colors.amber],
+                                                  ).createShader(rect),
+                                                  child: Text(
+                                                    context.loc.conversation,
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight: FontWeight.bold,
+                                                      fontSize: 15.8,
+                                                      letterSpacing: 0.5,
+                                                    ),
                                                   ),
                                                 ),
                                               ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            ...messages
-                                                .asMap()
-                                                .entries
-                                                .map((entry) {
-                                              final msg = entry.value;
-                                              final isMe = msg['isMe'] ?? false;
-                                              final color = isMe
-                                                  ? (isDark
-                                                      ? Colors.cyanAccent
-                                                      : Colors.deepPurpleAccent)
-                                                  : Colors.blueGrey;
-                                              final List<Map<String, dynamic>>
-                                                  cands = List<
-                                                          Map<String,
-                                                              dynamic>>.from(
-                                                      msg['cands'] ?? const []);
-                                              return Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                        vertical: 6),
-                                                child: Row(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Container(
-                                                      decoration: BoxDecoration(
-                                                        gradient:
-                                                            LinearGradient(
-                                                          colors: [
-                                                            color.withOpacity(
-                                                                0.82),
-                                                            color.withOpacity(
-                                                                0.66)
-                                                          ],
-                                                          begin:
-                                                              Alignment.topLeft,
-                                                          end: Alignment
-                                                              .bottomRight,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(50),
-                                                      ),
-                                                      child: CircleAvatar(
-                                                        backgroundColor:
-                                                            Colors.transparent,
-                                                        radius: 16,
-                                                        child: Text(
-                                                          (msg['user'] as String?)
-                                                                      ?.isNotEmpty ==
-                                                                  true
-                                                              ? (msg['user']
-                                                                      as String)[0]
-                                                                  .toUpperCase()
-                                                              : "?",
-                                                          style:
-                                                              const TextStyle(
-                                                                  color: Colors
-                                                                      .white,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .bold,
-                                                                  fontSize: 17),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 10),
-                                                    Expanded(
-                                                      child: AnimatedContainer(
-                                                        duration:
-                                                            const Duration(
-                                                                milliseconds:
-                                                                    340),
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .symmetric(
-                                                                vertical: 10,
-                                                                horizontal: 13),
-                                                        decoration:
-                                                            BoxDecoration(
-                                                          color: color
-                                                              .withOpacity(isMe
-                                                                  ? 0.19
-                                                                  : 0.16),
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(15),
-                                                          border: Border.all(
-                                                            color: color
-                                                                .withOpacity(
-                                                                    0.22),
-                                                            width: 1.1,
+                                              const SizedBox(height: 2),
+                                              ...messages.asMap().entries.map((entry) {
+                                                final msg = entry.value;
+                                                final isMe = msg['isMe'] ?? false;
+                                                final color = isMe
+                                                    ? (isDark ? Colors.cyanAccent : Colors.deepPurpleAccent)
+                                                    : userColors[entry.key % userColors.length];
+                                                return Padding(
+                                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                                  child: Row(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Container(
+                                                        decoration: BoxDecoration(
+                                                          gradient: LinearGradient(
+                                                            colors: [
+                                                              color.withOpacity(0.82),
+                                                              color.withOpacity(0.66)
+                                                            ],
+                                                            begin: Alignment.topLeft,
+                                                            end: Alignment.bottomRight,
                                                           ),
-                                                          boxShadow: [
-                                                            BoxShadow(
-                                                              color: color
-                                                                  .withOpacity(
-                                                                      0.08),
-                                                              blurRadius: 8,
-                                                              offset:
-                                                                  Offset(0, 3),
-                                                            ),
-                                                          ],
+                                                          borderRadius: BorderRadius.circular(50),
                                                         ),
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Row(
-                                                              children: [
-                                                                Text(
-                                                                  msg['user'] ??
-                                                                      '',
-                                                                  style:
-                                                                      TextStyle(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .bold,
-                                                                    color:
-                                                                        color,
-                                                                    fontSize:
-                                                                        14.5,
-                                                                  ),
-                                                                ),
-                                                                const SizedBox(
-                                                                    width: 6),
-                                                                if (isMe)
-                                                                  Container(
-                                                                    decoration:
-                                                                        BoxDecoration(
-                                                                      color: Colors
-                                                                          .amber
-                                                                          .withOpacity(
-                                                                              0.12),
-                                                                      borderRadius:
-                                                                          BorderRadius.circular(
-                                                                              9),
-                                                                    ),
-                                                                    padding: const EdgeInsets
-                                                                        .symmetric(
-                                                                        horizontal:
-                                                                            6,
-                                                                        vertical:
-                                                                            2),
-                                                                    child: Row(
-                                                                      children: const [
-                                                                        Icon(
-                                                                            Icons
-                                                                                .verified,
-                                                                            size:
-                                                                                14,
-                                                                            color:
-                                                                                Colors.amber),
-                                                                        SizedBox(
-                                                                            width:
-                                                                                2),
-                                                                        Text(
-                                                                            "You",
-                                                                            style: TextStyle(
-                                                                                color: Colors.amber,
-                                                                                fontWeight: FontWeight.w700,
-                                                                                fontSize: 11)),
-                                                                      ],
-                                                                    ),
-                                                                  ),
-                                                              ],
+                                                        child: CircleAvatar(
+                                                          backgroundColor: Colors.transparent,
+                                                          radius: 16,
+                                                          child: Text(
+                                                            (msg['user'] as String?)?.isNotEmpty == true
+                                                                ? (msg['user'] as String)[0].toUpperCase()
+                                                                : "?",
+                                                            style: const TextStyle(
+                                                                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 10),
+                                                      Expanded(
+                                                        child: AnimatedContainer(
+                                                          duration: const Duration(milliseconds: 340),
+                                                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 13),
+                                                          decoration: BoxDecoration(
+                                                            color: color.withOpacity(isMe ? 0.19 : 0.16),
+                                                            borderRadius: BorderRadius.circular(15),
+                                                            border: Border.all(
+                                                              color: color.withOpacity(0.22),
+                                                              width: 1.1,
                                                             ),
-                                                            const SizedBox(
-                                                                height: 3),
-                                                            Text(
-                                                              msg['text'] ?? '',
-                                                              style: TextStyle(
-                                                                color: isDark
-                                                                    ? Colors
-                                                                        .white
-                                                                        .withOpacity(
-                                                                            0.92)
-                                                                    : Colors
-                                                                        .black87,
-                                                                fontSize: 15.1,
-                                                                height: 1.26,
+                                                            boxShadow: [
+                                                              BoxShadow(
+                                                                color: color.withOpacity(0.08),
+                                                                blurRadius: 8,
+                                                                offset: Offset(0, 3),
                                                               ),
-                                                            ),
-                                                            if (cands
-                                                                .isNotEmpty) ...[
-                                                              const SizedBox(
-                                                                  height: 8),
-                                                              Wrap(
-                                                                spacing: 6,
-                                                                runSpacing: 6,
+                                                            ],
+                                                          ),
+                                                          child: Column(
+                                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                                            children: [
+                                                              Row(
                                                                 children: [
-                                                                  for (int i =
-                                                                          0;
-                                                                      i <
-                                                                          cands
-                                                                              .length;
-                                                                      i++)
-                                                                    _CandidateChip(
-                                                                      name: cands[i]
-                                                                              [
-                                                                              'name']
-                                                                          as String,
-                                                                      percent: ((cands[i]['score']
-                                                                              as double) *
-                                                                          100.0),
-                                                                      highlight:
-                                                                          i ==
-                                                                              0,
-                                                                      dark:
-                                                                          isDark,
+                                                                  Text(
+                                                                    msg['user'] ?? '',
+                                                                    style: TextStyle(
+                                                                      fontWeight: FontWeight.bold,
+                                                                      color: color,
+                                                                      fontSize: 14.5,
+                                                                    ),
+                                                                  ),
+                                                                  const SizedBox(width: 6),
+                                                                  if (isMe)
+                                                                    Container(
+                                                                      decoration: BoxDecoration(
+                                                                        color: Colors.amber.withOpacity(0.12),
+                                                                        borderRadius: BorderRadius.circular(9),
+                                                                      ),
+                                                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                      child: Row(
+                                                                        children: [
+                                                                          Icon(Icons.verified, size: 14, color: Colors.amber),
+                                                                          SizedBox(width: 2),
+                                                                          Text("You", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.w700, fontSize: 11)),
+                                                                        ],
+                                                                      ),
                                                                     ),
                                                                 ],
                                                               ),
-                                                            ],
-                                                            const SizedBox(
-                                                                height: 4),
-                                                            Align(
-                                                              alignment: Alignment
-                                                                  .bottomRight,
-                                                              child: Text(
-                                                                msg['time'] ??
-                                                                    '',
-                                                                style:
-                                                                    TextStyle(
-                                                                  color: isDark
-                                                                      ? Colors
-                                                                          .white54
-                                                                      : Colors
-                                                                          .blueGrey,
-                                                                  fontSize: 12,
+                                                              const SizedBox(height: 3),
+                                                              Text(
+                                                                msg['text'] ?? '',
+                                                                style: TextStyle(
+                                                                  color: isDark ? Colors.white.withOpacity(0.92) : Colors.black87,
+                                                                  fontSize: 15.1,
+                                                                  height: 1.26,
                                                                 ),
                                                               ),
-                                                            ),
-                                                          ],
+                                                              const SizedBox(height: 4),
+                                                              Align(
+                                                                alignment: Alignment.bottomRight,
+                                                                child: Text(
+                                                                  msg['time'] ?? '',
+                                                                  style: TextStyle(
+                                                                    color: isDark ? Colors.white54 : Colors.blueGrey,
+                                                                    fontSize: 12,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
                                                         ),
                                                       ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              );
-                                            }),
-                                          ],
-                                        ),
-                                      )
-                                    ],
+                                                    ],
+                                                  ),
+                                                );
+                                              }),
+                                            ],
+                                          ),
+                                        )
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                );
-              },
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ),
-        ),
-      ]),
+        ],
+      ),
     );
   }
 }
