@@ -17,6 +17,7 @@ import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../../../core/utils/routing/routes.dart';
+import '../../../../core/speaker/speaker_service.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -54,6 +55,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Color _myColor = const Color(0xFF1E88E5);
 
   final FlutterTts _flutterTts = FlutterTts();
+  final SpeakerService _speakerService = SpeakerService();
 
   String _appLanguageCode = 'en';
 
@@ -86,6 +88,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
+    _speakerService.init();
     _initUser();
     _initTTS();
     _loadSpeakOnMeeting();
@@ -142,6 +145,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
+    _speakerService.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -227,8 +231,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     await _recorder.start(
       RecordConfig(
         encoder: AudioEncoder.wav,
-        bitRate: 256000,
-        sampleRate: 44100,
+        // Align with speaker identification model expectations
+        // by using 16kHz mono, similar to SpeakerScreen.
+        bitRate: 128000,
+        sampleRate: 16000,
         numChannels: 1,
       ),
       path: _currentFilePath!,
@@ -271,8 +277,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       await _recorder.start(
         RecordConfig(
           encoder: AudioEncoder.wav,
-          bitRate: 256000,
-          sampleRate: 44100,
+          // Use 16kHz mono to ensure backend speaker
+          // identification produces correct matches.
+          bitRate: 128000,
+          sampleRate: 16000,
           numChannels: 1,
         ),
         path: _currentFilePath!,
@@ -578,12 +586,19 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
         final speakers = body['speakers'] as List<dynamic>;
+        String? localName;
+        try {
+          localName = await _speakerService.identify(audioFile.path);
+        } catch (_) {
+          localName = null;
+        }
 
         setState(() {
           for (var speakerEntry in speakers) {
             final key = (speakerEntry as Map<String, dynamic>).keys.first;
             final data = speakerEntry[key] as Map<String, dynamic>;
-            final name = data['name'] as String? ?? 'Unknown';
+            final apiName = data['name'] as String? ?? 'Unknown';
+            final name = localName ?? apiName;
             final text = data['spoken_text'] as String? ?? '';
             final time = TimeOfDay.now().format(context);
 
