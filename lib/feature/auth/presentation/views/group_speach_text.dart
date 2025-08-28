@@ -228,7 +228,11 @@ String _generateTempFilePath() {
     }
     if (!_speechAvailable) return;
     _currentTranscript = '';
-    _speechToText.listen(
+    // Ensure any existing session is fully stopped before starting a new one.
+    if (_speechToText.isListening) {
+      await _speechToText.stop();
+    }
+    await _speechToText.listen(
       localeId: _appLanguageCode,
       onResult: (result) {
         _currentTranscript = result.recognizedWords;
@@ -238,7 +242,9 @@ String _generateTempFilePath() {
 
   Future<String> _stopSpeechRecognition() async {
     if (!_speechAvailable) return _currentTranscript;
-    await _speechToText.stop();
+    if (_speechToText.isListening) {
+      await _speechToText.stop();
+    }
     return _currentTranscript;
   }
 
@@ -475,9 +481,11 @@ String _generateTempFilePath() {
     }
 
     final time = TimeOfDay.now().format(context);
+    // Use a fallback speaker label if identification fails
+    final displayName = localName ?? 'Speaker ${_speakerIndex + 1}';
     setState(() {
       _messages.add({
-        'user': localName ?? 'Unknown',
+        'user': displayName,
         'text': text,
         'time': time,
         'isMe': false,
