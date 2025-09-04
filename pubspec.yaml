@@ -64,14 +64,15 @@ dependencies:
   go_router: ^15.1.2
   showcaseview: ^4.0.1
   flutter_facebook_auth: ^7.1.2
-  rxdart: ^0.28.0
   razorpay_flutter: ^1.4.0
   flutter_inappwebview: ^6.1.5
   sherpa_onnx: ^1.12.10
   audio_session: ^0.1.18
+  google_speech: ^5.3.0
 
 
-
+assets/google_speech_service_account:
+  json:
 
 flutter:
   generate: true
@@ -85,6 +86,7 @@ flutter:
     - assets/images/
     - assets/models/
     - assets/asr/
+    - assets/google_speech_service_account.json
 
   # To add custom fonts to your application, add a fonts section here,
   # in this "flutter" section. Each entry in this list should have a
