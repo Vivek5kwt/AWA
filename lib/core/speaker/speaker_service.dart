@@ -29,6 +29,7 @@ class SpeakerService {
   static const _assetModelPath =
       'assets/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx';
 
+
   SpeakerEmbeddingExtractor? _extractor; // non-null when ONNX available
   String? _modelLocalPath; // copied model path in app storage
   late String _storeKey; // per-mode bucket (onnx vs fallback)
