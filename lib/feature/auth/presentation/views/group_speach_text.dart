@@ -21,6 +21,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:google_speech/google_speech.dart' as gcloud;
 import '../../../../core/speaker/speaker_service.dart';
+import '../../../../stream_audio_controller.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -128,6 +129,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   @override
   void initState() {
     super.initState();
+    SystemAudioControl.muteVoiceFeedback();
     _micGlowController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -138,9 +140,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _svcInitFut = _speakerService.init().then((_) {
       if (!_modeToastShown && mounted) {
         _modeToastShown = true;
-        _toast(_speakerService.isFallback
+    /*    _toast(_speakerService.isFallback
             ? 'Speaker model not found — using local fallback.'
-            : 'High-accuracy speaker model loaded.');
+            : 'High-accuracy speaker model loaded.');*/
       }
     });
 
@@ -165,8 +167,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     await session.configure(AudioSessionConfiguration(
       androidAudioAttributes: const AndroidAudioAttributes(
         contentType: AndroidAudioContentType.speech,
-        usage: AndroidAudioUsage.voiceCommunication,
+        usage: AndroidAudioUsage.media,
       ),
+
       androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
       androidWillPauseWhenDucked: true,
       avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
@@ -305,33 +308,32 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   void _onSpeechError(SpeechRecognitionError error) async {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+/*    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Speech error: ${error.errorMsg}'),
         backgroundColor: Colors.redAccent,
         duration: const Duration(seconds: 2),
       ),
-    );
+    );*/
     if (error.errorMsg.contains('timeout')) {
       _consecutiveTimeouts++;
     }
   }
 
   String _pickBestLocale() {
-    if (_supportedLocales.isEmpty) {
-      return _chosenLocaleId ??
-          (_appLanguageCode.toLowerCase().startsWith('hi') ? 'hi-IN' : 'en-US');
-    }
     final lc = _appLanguageCode.toLowerCase();
-    final match = _supportedLocales.firstWhere(
-          (l) => l.localeId.toLowerCase().startsWith(lc),
-      orElse: () => _supportedLocales.firstWhere(
-            (l) => l.localeId.toLowerCase().startsWith('en-us'),
-        orElse: () => _supportedLocales.first,
-      ),
-    );
-    return _chosenLocaleId ?? match.localeId;
+    if (lc.startsWith('hi')) return 'hi-IN';   // Hindi
+    if (lc.startsWith('pa')) return 'pa-IN';   // Punjabi
+    if (lc.startsWith('bn')) return 'bn-IN';   // Bengali
+    if (lc.startsWith('ta')) return 'ta-IN';   // Tamil
+    if (lc.startsWith('te')) return 'te-IN';   // Telugu
+    if (lc.startsWith('gu')) return 'gu-IN';   // Gujarati
+    if (lc.startsWith('ml')) return 'ml-IN';   // Malayalam
+    if (lc.startsWith('mr')) return 'mr-IN';   // Marathi
+    if (lc.startsWith('kn')) return 'kn-IN';   // Kannada
+    return 'en-IN'; // fallback
   }
+
 
   // Fallback live STT (only if file transcription returns nothing)
   Future<String?> _fallbackLiveStt() async {
@@ -357,8 +359,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         listenMode: ListenMode.dictation,
         partialResults: true,
         cancelOnError: false,
-        pauseFor: const Duration(seconds: 10),
-        listenFor: const Duration(seconds: 10),
+        pauseFor: const Duration(seconds: 5),
+        listenFor: const Duration(seconds: 5),
         onResult: (res) {
           if (res.recognizedWords.trim().isNotEmpty) {
             last = res.recognizedWords.trim();
@@ -519,6 +521,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         sampleRateHertz: 16000,
         languageCode: _pickBestLocale(),
         enableAutomaticPunctuation: true,
+        // model: RecognitionModel.basic // optional, default works too
       );
 
       final audio = await File(path).readAsBytes();
@@ -635,7 +638,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
     if (text == null && !_missingTranscriberToastShown && mounted) {
       _missingTranscriberToastShown = true;
-      _toast('No file-based transcription available. Falling back to live STT.');
     }
     text = await _transcribeWithGoogleSpeech(path);
     return text;
@@ -705,6 +707,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
           path: wavPath,
           index: ++_segmentCounter,
           createdAt: DateTime.now(),
+
         ));
         _kickProcessor(); // start worker if idle
       } else {
@@ -741,11 +744,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       // Guarantee we show *something* for the segment so order is visible
       text = (text == null || text.trim().isEmpty) ? '[could not transcribe]' : text.trim();
 
-      await _appendRecognizedText(
-        text,
-        speakerName: idRes.name,
-        segIndex: seg.index,
-      );
+      if (text != null && text.trim().isNotEmpty) {
+        await _appendRecognizedText(
+          text.trim(),
+          speakerName: idRes.name,
+          segIndex: ++_segmentCounter,
+        );
+      } else {
+        debugPrint("⚠️ Skipped empty segment ${seg.index}");
+      }
 
       // clean up the temp file
       try {
@@ -926,6 +933,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _speakerService.dispose();
     _scrollController.dispose();
     _liveCaptionClearTimer?.cancel();
+    SystemAudioControl.unmuteVoiceFeedback();
+
     super.dispose();
   }
 
@@ -1156,23 +1165,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
               Column(
                 children: [
                   const SizedBox(height: 20),
-                  if (showTimeoutBanner)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.90),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          "Speech service is timing out.\nTip: enable Speech Services by Google and download an offline pack (Google app → Settings → Voice).",
-                          style: TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.w600),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -1220,33 +1212,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                     ],
                   ),
                   const SizedBox(height: 6),
-
-                  // ID headline + mode
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                    child: Column(
-                      children: [
-                        Text(
-                          idHeadline,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: textPrimary.withOpacity(0.90),
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${_speakerService.isFallback ? 'Mode: Fallback (local)' : 'Mode: ONNX model'} • Threshold 74%',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: textSecondary,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
 
                   Expanded(
                     child: NotificationListener<ScrollNotification>(
@@ -1365,28 +1330,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                           fontSize: 16,
                                         ),
                                       ),
-                                      if (seg != null)
-                                        Container(
-                                          padding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: color.withOpacity(0.18),
-                                            borderRadius:
-                                            BorderRadius.circular(8),
-                                          ),
-                                          child: Text(
-                                            'Seg #$seg',
-                                            style: TextStyle(
-                                              color: widget.isDarkMode
-                                                  ? Colors.white70
-                                                  : Colors.blueGrey[900],
-                                              fontSize: 11.5,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
                                       if (isMe)
                                         _speakOnMeeting
                                             ? spoken
