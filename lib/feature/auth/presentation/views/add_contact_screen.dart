@@ -1024,8 +1024,7 @@ class _AddContactScreenState extends State<AddContactScreen>
             Colors.blueGrey);
       }
     } else {
-      _showSnackbar(
-          "ASR not bundled. Verified loud/clear only.", Colors.blueGrey);
+
     }
 
     return true;

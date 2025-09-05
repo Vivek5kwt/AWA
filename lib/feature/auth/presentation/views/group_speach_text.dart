@@ -638,6 +638,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
     if (text == null && !_missingTranscriberToastShown && mounted) {
       _missingTranscriberToastShown = true;
+      _toast('No file-based transcription available. Falling back to live STT.');
     }
     text = await _transcribeWithGoogleSpeech(path);
     return text;
@@ -1212,6 +1213,33 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                     ],
                   ),
                   const SizedBox(height: 6),
+
+                  // ID headline + mode
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                    child: Column(
+                      children: [
+                        Text(
+                          idHeadline,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textPrimary.withOpacity(0.90),
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${_speakerService.isFallback ? 'Mode: Fallback (local)' : 'Mode: ONNX model'} • Threshold 74%',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: textSecondary,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
                   Expanded(
                     child: NotificationListener<ScrollNotification>(
