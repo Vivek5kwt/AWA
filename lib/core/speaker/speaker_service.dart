@@ -27,7 +27,7 @@ class SpeakerService {
   factory SpeakerService() => _instance;
 
   static const _assetModelPath =
-      'assets/models/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx';
+      'assets/models/assets/models/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx';
 
 
   SpeakerEmbeddingExtractor? _extractor; // non-null when ONNX available
@@ -82,7 +82,7 @@ class SpeakerService {
 
     // Separate the stores so ONNX and fallback samples never mix
     _storeKey = _extractor != null
-        ? '3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx'
+        ? 'assets/models/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx'
         : 'speaker_embeddings_v3_fallback';
   }
 
@@ -332,7 +332,7 @@ class SpeakerService {
     try {
       final bytes = await rootBundle.load(_assetModelPath);
       final dir = await getApplicationSupportDirectory();
-      final dst = File('${dir.path}/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx');
+      final dst = File('${dir.path}/assets/models/3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k.onnx');
       if (!await dst.exists() || (await dst.length()) != bytes.lengthInBytes) {
         await dst.create(recursive: true);
         await dst.writeAsBytes(bytes.buffer.asUint8List(), flush: true);

@@ -2,20 +2,16 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
-import 'dart:typed_data';
-import 'dart:convert';
-
 import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart' as rec;
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/speaker/speaker_service.dart';
-
-// Optional ASR (kept dynamic usage so your app compiles even if API changes)
-import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
+import '../../../../core/network/http_service.dart';
 
 class AddContactScreen extends StatefulWidget {
   final String name;
@@ -31,14 +27,6 @@ class AddContactScreen extends StatefulWidget {
 
   @override
   State<AddContactScreen> createState() => _AddContactScreenState();
-}
-
-// Tiny WAV metadata container for local checks
-class _WavInfo {
-  _WavInfo(this.samples, this.sampleRate, this.channels);
-  final Int16List samples;
-  final int sampleRate;
-  final int channels;
 }
 
 class _AddContactScreenState extends State<AddContactScreen>
@@ -66,7 +54,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   late final AnimationController _checkBurst;
   late final Animation<double> _burstScale;
   List<bool> _wordVisible = [];
-  final SpeakerService _speakerService = SpeakerService();
+  String _email = '';
   bool _userStartedSpeaking = false;
   DateTime? _lastVoiceTime;
   bool _dialogActive = false;
@@ -74,11 +62,6 @@ class _AddContactScreenState extends State<AddContactScreen>
   bool _showRepeatTutorial = false;
   bool _repeatTutorialSeen = false;
   bool _showNameIntro = false;
-
-  // ==== NEW: offline ASR (optional) ====
-  dynamic _asr; // <- declared here so it's defined
-  bool _asrReady = false;
-  String? _asrKind; // paraformer/transducer/whisper (for future use)
 
   static const int silenceThresholdMs = 700;
   static const int ignoreInitialMs = 300;
@@ -88,8 +71,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.name);
-    _speakerService.init();
-    _initASR(); // <-- now defined below
+    _loadStoredEmail();
     _loadTutorialFlags();
 
     _micPulse = AnimationController(
@@ -112,6 +94,14 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _revealWords();
+  }
+
+  Future<void> _loadStoredEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _email = prefs.getString('email') ?? '';
+    });
   }
 
   Future<void> _loadTutorialFlags() async {
@@ -154,9 +144,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     _micPulse.dispose();
     _checkBurst.dispose();
     _nameController?.dispose();
-    try {
-      _asr?.free();
-    } catch (_) {}
     super.dispose();
   }
 
@@ -177,15 +164,14 @@ class _AddContactScreenState extends State<AddContactScreen>
     }
 
     final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/sentence_${_currentIndex + 1}.wav';
+    final filePath = '${dir.path}/sentence_${_currentIndex + 1}.m4a';
     _currentRecordingPath = filePath;
 
     await _recorder.start(
       const rec.RecordConfig(
-        encoder: rec.AudioEncoder.wav,
-        sampleRate: 16000,
-        numChannels: 1,
+        encoder: rec.AudioEncoder.aacLc,
         bitRate: 128000,
+        sampleRate: 44100,
       ),
       path: filePath,
     );
@@ -255,7 +241,6 @@ class _AddContactScreenState extends State<AddContactScreen>
       ),
     );
   }
-
   Future<void> _askForContactName() async {
     _dialogActive = true;
     final isDark = widget.isDarkMode;
@@ -393,10 +378,9 @@ class _AddContactScreenState extends State<AddContactScreen>
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.check_circle, size: 20),
-                          label: Text(context.loc.saveContinue),
+                          label:  Text(context.loc.saveContinue),
                           style: ElevatedButton.styleFrom(
-                            foregroundColor:
-                            Theme.of(context).colorScheme.onPrimary,
+                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
                             backgroundColor: Theme.of(context).primaryColor,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -457,25 +441,11 @@ class _AddContactScreenState extends State<AddContactScreen>
       final isValid = await _isAudioValid(_currentRecordingPath!);
       if (!isValid) {
         setState(() => _showTryAgain = true);
-        _showSnackbar(
-            "Voice not clear or too quiet. Please speak clearly.",
-            Colors.redAccent);
+        _showSnackbar("Voice not clear or too quiet. Please speak clearly.", Colors.redAccent);
         return;
       }
       setState(() => _isUploading = true);
-
-      // ==== quality + sentence check before saving ====
-      final ok = await _validateRecordingForStep(_currentRecordingPath!);
-      if (!ok) {
-        if (!mounted) return;
-        setState(() {
-          _isUploading = false;
-          _showTryAgain = true;
-        });
-        return;
-      }
-
-      await _registerSpeakerLocal(_currentRecordingPath!);
+      await _registerSpeakerAPI(_currentRecordingPath!);
       if (!mounted) return;
       setState(() => _isUploading = false);
     } else {
@@ -484,35 +454,54 @@ class _AddContactScreenState extends State<AddContactScreen>
     }
   }
 
-  Future<void> _registerSpeakerLocal(String filePath) async {
+  Future<void> _registerSpeakerAPI(String filePath) async {
     try {
-      await _speakerService.enrollAppend(_nameController!.text, filePath);
+      final uri = Uri.parse(
+        ApiConstants.registerSpeaker.endsWith('/')
+            ? ApiConstants.registerSpeaker
+            : '${ApiConstants.registerSpeaker}/',
+      );
+      final req = http.MultipartRequest('POST', uri)
+        ..fields['name'] = _nameController!.text
+        ..fields['sentence_no'] = (_currentIndex + 1).toString()
+        ..fields['email'] = _email
+        ..files.add(await http.MultipartFile.fromPath(
+          'audio_file',
+          filePath,
+          contentType: MediaType('audio', 'm4a'),
+        ));
+      final resp = await req.send();
+      await resp.stream.toBytes();
       if (!mounted) return;
-      setState(() => _showSuccess = true);
-      _checkBurst.forward(from: 0);
-      await Future.delayed(const Duration(milliseconds: 1200));
-      if (!mounted) return;
-      if (_currentIndex < _sentences.length - 1) {
-        setState(() {
-          _currentIndex++;
-          _showSuccess = false;
-          _progress = 0.0;
-          _userStartedSpeaking = false;
-        });
-        _revealWords();
-      } else {
-        _showSnackbar(
-          "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
-          Colors.greenAccent,
-        );
-        await Future.delayed(const Duration(milliseconds: 800));
+      if (resp.statusCode == 200) {
+        setState(() => _showSuccess = true);
+        _checkBurst.forward(from: 0);
+        await Future.delayed(const Duration(milliseconds: 1200));
         if (!mounted) return;
-        context.pop(true);
+        if (_currentIndex < _sentences.length - 1) {
+          setState(() {
+            _currentIndex++;
+            _showSuccess = false;
+            _progress = 0.0;
+            _userStartedSpeaking = false;
+          });
+          _revealWords();
+        } else {
+          _showSnackbar(
+            "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
+            Colors.greenAccent,
+          );
+          await Future.delayed(const Duration(milliseconds: 800));
+          if (!mounted) return;
+          context.pop(true);
+        }
+      } else {
+        setState(() => _showTryAgain = true);
       }
     } catch (_) {
       if (!mounted) return;
       setState(() => _showTryAgain = true);
-      _showSnackbar("Error saving sample. Please try again.", Colors.redAccent);
+      _showSnackbar("Network error. Please try again.", Colors.redAccent);
     }
   }
 
@@ -520,8 +509,7 @@ class _AddContactScreenState extends State<AddContactScreen>
     if (!_repeatTutorialSeen) {
       setState(() => _showRepeatTutorial = true);
       _repeatTutorialSeen = true;
-      SharedPreferences.getInstance()
-          .then((p) => p.setBool('add_contact_repeat_tutorial_shown', true));
+      SharedPreferences.getInstance().then((p) => p.setBool('add_contact_repeat_tutorial_shown', true));
       return;
     }
     if (_isRecording) {
@@ -601,16 +589,12 @@ class _AddContactScreenState extends State<AddContactScreen>
                 Text(
                   context.loc.repeatSentenceHint,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
                 Text(
                   context.loc.tapMicToRecord,
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.9), fontSize: 15),
+                  style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15),
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -815,7 +799,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                                       end: Alignment.bottomCenter,
                                     ).createShader(bounds);
                                   },
-                                  child: Text(
+                                  child:  Text(
                                     context.loc.voiceMatched,
                                     style: TextStyle(
                                         fontSize: 22,
@@ -849,12 +833,10 @@ class _AddContactScreenState extends State<AddContactScreen>
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                        color: Colors.black45,
-                                        blurRadius: 8),
+                                        color: Colors.black45, blurRadius: 8),
                                     if (_isRecording)
                                       BoxShadow(
-                                        color: Colors.redAccent
-                                            .withOpacity(0.5),
+                                        color: Colors.redAccent.withOpacity(0.5),
                                         blurRadius: 20,
                                         spreadRadius: 5,
                                       ),
@@ -920,7 +902,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                   ),
                   Padding(
                       padding: const EdgeInsets.only(bottom: 14, top: 8),
-                      child: Text(
+                      child:Text(
                         _isRecording
                             ? context.loc.recordingSpeakClearly
                             : context.loc.tapMicToRecord,
@@ -928,12 +910,14 @@ class _AddContactScreenState extends State<AddContactScreen>
                           color: Colors.white.withOpacity(0.83),
                           fontSize: 16,
                         ),
-                      )),
+                      )
+
+                  ),
                   if (_showTryAgain)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 8),
                       child: Text(
-                        "Voice not clear or incorrect. Please try again.",
+                        context.loc.voiceNotClear,
                         style: TextStyle(color: Colors.redAccent),
                       ),
                     ),
@@ -952,247 +936,6 @@ class _AddContactScreenState extends State<AddContactScreen>
         ),
       ),
     );
-  }
-
-  // ---------------------------------------------------------------------------
-  //                       ADDED: ASR + VALIDATION HELPERS
-  // ---------------------------------------------------------------------------
-
-  Future<void> _initASR() async {
-    // Safe no-op init. If you bundle an offline ASR model, this will try to use it.
-    try {
-      so.initBindings(); // ok if already called elsewhere
-    } catch (_) {}
-    // If you later ship an ASR model, create the recognizer here and set:
-    // _asr = yourSherpaRecognizer; _asrReady = true;
-    _asrReady = false;
-    _asr = null;
-  }
-
-  Future<bool> _validateRecordingForStep(String wavPath) async {
-    // 1) Parse wav & do quality checks
-    final info = await _parseWav(wavPath);
-    if (info == null) {
-      _showSnackbar("Invalid audio. Please try again.", Colors.redAccent);
-      return false;
-    }
-    final frames = info.samples.length ~/ info.channels;
-    final durationSec = frames / info.sampleRate;
-
-    if (durationSec < 0.8) {
-      _showSnackbar("Too short. Speak for at least 1 second.", Colors.redAccent);
-      return false;
-    }
-
-    // RMS on mono
-    final mono = _downmixToMono(info.samples, info.channels);
-    double sumSq = 0.0;
-    int clipped = 0;
-    for (final s in mono) {
-      final v = s / 32768.0;
-      sumSq += v * v;
-      if (s >= 32760 || s <= -32760) clipped++;
-    }
-    final rms = sqrt(sumSq / mono.length.clamp(1, 0x7fffffff));
-    final clipRatio = clipped / mono.length;
-
-    if (rms < 0.030) {
-      _showSnackbar("Too quiet. Please speak closer and louder.", Colors.redAccent);
-      return false;
-    }
-    if (clipRatio > 0.02) {
-      _showSnackbar("Too loud / distorted. Please speak a bit softer.", Colors.redAccent);
-      return false;
-    }
-
-    // 2) If ASR is available, verify the sentence content
-    if (_asrReady && _asr != null) {
-      final text = await _transcribeWithASR(mono, info.sampleRate);
-      if (text != null && text.trim().isNotEmpty) {
-        final expected = _normalizeText(_sentences[_currentIndex]);
-        final heard = _normalizeText(text);
-        final sim = _levenshteinRatio(heard, expected); // [0..1]
-        if (sim < 0.78) {
-          _showSnackbar(
-              "Please repeat exactly: \"${_sentences[_currentIndex]}\"\n(Heard: $text)",
-              Colors.redAccent);
-          return false;
-        }
-      } else {
-        _showSnackbar(
-            "Couldn’t verify words (ASR unavailable). Using clarity-only check.",
-            Colors.blueGrey);
-      }
-    } else {
-
-    }
-
-    return true;
-  }
-
-  // ----- Tiny WAV parser (16-bit PCM) -----
-
-  Future<_WavInfo?> _parseWav(String path) async {
-    try {
-      final bytes = await File(path).readAsBytes();
-      if (bytes.length < 44) return null;
-      String s(int off, int n) => String.fromCharCodes(bytes.sublist(off, off + n));
-      if (s(0, 4) != 'RIFF' || s(8, 4) != 'WAVE') return null;
-
-      final bd = ByteData.sublistView(bytes);
-      int? sampleRate;
-      int? bitsPerSample;
-      int? dataOffset;
-      int? dataSize;
-      int? numChannels;
-
-      int offset = 12;
-      while (offset + 8 <= bytes.length) {
-        final id = s(offset, 4);
-        final size = bd.getUint32(offset + 4, Endian.little);
-        final next = offset + 8 + size + (size.isOdd ? 1 : 0);
-        if (id == 'fmt ') {
-          final audioFormat = bd.getUint16(offset + 8, Endian.little);
-          numChannels = bd.getUint16(offset + 10, Endian.little);
-          sampleRate = bd.getUint32(offset + 12, Endian.little);
-          bitsPerSample = bd.getUint16(offset + 22, Endian.little);
-          if (audioFormat != 1 || bitsPerSample != 16 || (numChannels ?? 0) < 1) {
-            return null; // expect PCM 16-bit mono/stereo
-          }
-        } else if (id == 'data') {
-          dataOffset = offset + 8;
-          dataSize = size;
-          break;
-        }
-        offset = next;
-      }
-      if (sampleRate == null ||
-          bitsPerSample != 16 ||
-          dataOffset == null ||
-          dataSize == null ||
-          numChannels == null) {
-        return null;
-      }
-      if (dataOffset + dataSize > bytes.length) return null;
-
-      final samples = Int16List.view(
-        bytes.buffer,
-        bytes.offsetInBytes + dataOffset,
-        dataSize ~/ 2,
-      );
-      return _WavInfo(samples, sampleRate!, numChannels);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  List<int> _downmixToMono(Int16List s, int channels) {
-    if (channels <= 1) return s.toList();
-    final frames = s.length ~/ channels;
-    final out = List<int>.filled(frames, 0);
-    int idx = 0;
-    for (int f = 0; f < frames; f++) {
-      int acc = 0;
-      for (int c = 0; c < channels; c++) {
-        acc += s[idx++];
-      }
-      out[f] = (acc ~/ channels);
-    }
-    return out;
-  }
-
-  // ----- Optional ASR usage (safe/no-crash) -----
-
-  Future<String?> _transcribeWithASR(List<int> monoPcm16, int sr) async {
-    if (_asr == null) return null;
-    try {
-      // resample to 16k if needed for most ASR models
-      const targetSr = 16000;
-      List<double> f = monoPcm16.map((e) => e / 32768.0).toList();
-      if (sr != targetSr) {
-        f = _resampleLinear(f, sr, targetSr);
-      }
-      final f32 = Float32List.fromList(f);
-
-      final stream = _asr.createStream();
-      // named args may differ across versions; dynamic + try-catch keeps it safe
-      try {
-        stream.acceptWaveform(samples: f32, sampleRate: targetSr);
-      } catch (_) {
-        try {
-          stream.acceptWaveform(f32, targetSr);
-        } catch (_) {}
-      }
-
-      try {
-        _asr.decode(stream);
-      } catch (_) {}
-
-      String? text;
-      try {
-        final res = _asr.getResult(stream);
-        if (res is String) {
-          text = res;
-        } else if (res != null) {
-          final maybeText = (res.text ?? res.toString()).toString();
-          text = maybeText;
-        }
-      } catch (_) {}
-      try {
-        stream.free();
-      } catch (_) {}
-      return text;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  List<double> _resampleLinear(List<double> x, int srcSr, int dstSr) {
-    if (srcSr == dstSr || x.isEmpty) return x;
-    final ratio = dstSr / srcSr;
-    final m = max(1, (x.length * ratio).round());
-    final out = List<double>.filled(m, 0.0);
-    for (int i = 0; i < m; i++) {
-      final t = i / ratio;
-      final idx = t.floor();
-      final frac = t - idx;
-      final a = x[idx];
-      final b = idx + 1 < x.length ? x[idx + 1] : a;
-      out[i] = a + (b - a) * frac;
-    }
-    return out;
-  }
-
-  // ----- Text normalization + fuzzy match -----
-
-  String _normalizeText(String s) {
-    final lower = s.toLowerCase();
-    final noPunct = lower.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
-    return noPunct.replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
-
-  double _levenshteinRatio(String a, String b) {
-    if (a == b) return 1.0;
-    if (a.isEmpty || b.isEmpty) return 0.0;
-    final n = a.length;
-    final m = b.length;
-    final dp = List<int>.generate(m + 1, (j) => j);
-    for (int i = 1; i <= n; i++) {
-      int prev = dp[0];
-      dp[0] = i;
-      for (int j = 1; j <= m; j++) {
-        final temp = dp[j];
-        final cost = a[i - 1] == b[j - 1] ? 0 : 1;
-        dp[j] = min(
-          min(dp[j] + 1, dp[j - 1] + 1),
-          prev + cost,
-        );
-        prev = temp;
-      }
-    }
-    final dist = dp[m];
-    final denom = max(n, m).toDouble();
-    return 1.0 - dist / denom;
   }
 }
 

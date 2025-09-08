@@ -21,7 +21,6 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:wave_blob/wave_blob.dart';
 import 'package:google_speech/google_speech.dart' as gcloud;
 import '../../../../core/speaker/speaker_service.dart';
-import '../../../../stream_audio_controller.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -129,7 +128,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   @override
   void initState() {
     super.initState();
-    SystemAudioControl.muteVoiceFeedback();
     _micGlowController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -140,9 +138,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _svcInitFut = _speakerService.init().then((_) {
       if (!_modeToastShown && mounted) {
         _modeToastShown = true;
-    /*    _toast(_speakerService.isFallback
+        _toast(_speakerService.isFallback
             ? 'Speaker model not found — using local fallback.'
-            : 'High-accuracy speaker model loaded.');*/
+            : 'High-accuracy speaker model loaded.');
       }
     });
 
@@ -167,9 +165,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     await session.configure(AudioSessionConfiguration(
       androidAudioAttributes: const AndroidAudioAttributes(
         contentType: AndroidAudioContentType.speech,
-        usage: AndroidAudioUsage.media,
+        usage: AndroidAudioUsage.voiceCommunication,
       ),
-
       androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
       androidWillPauseWhenDucked: true,
       avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
@@ -308,13 +305,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
   void _onSpeechError(SpeechRecognitionError error) async {
     if (!mounted) return;
-/*    ScaffoldMessenger.of(context).showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Speech error: ${error.errorMsg}'),
         backgroundColor: Colors.redAccent,
         duration: const Duration(seconds: 2),
       ),
-    );*/
+    );
     if (error.errorMsg.contains('timeout')) {
       _consecutiveTimeouts++;
     }
@@ -359,8 +356,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         listenMode: ListenMode.dictation,
         partialResults: true,
         cancelOnError: false,
-        pauseFor: const Duration(seconds: 5),
-        listenFor: const Duration(seconds: 5),
+        pauseFor: const Duration(seconds: 10),
+        listenFor: const Duration(seconds: 10),
         onResult: (res) {
           if (res.recognizedWords.trim().isNotEmpty) {
             last = res.recognizedWords.trim();
@@ -745,15 +742,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       // Guarantee we show *something* for the segment so order is visible
       text = (text == null || text.trim().isEmpty) ? '[could not transcribe]' : text.trim();
 
-      if (text != null && text.trim().isNotEmpty) {
-        await _appendRecognizedText(
-          text.trim(),
-          speakerName: idRes.name,
-          segIndex: ++_segmentCounter,
-        );
-      } else {
-        debugPrint("⚠️ Skipped empty segment ${seg.index}");
-      }
+      await _appendRecognizedText(
+        text,
+        speakerName: idRes.name,
+        segIndex: ++_segmentCounter,
+      );
 
       // clean up the temp file
       try {
@@ -934,8 +927,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _speakerService.dispose();
     _scrollController.dispose();
     _liveCaptionClearTimer?.cancel();
-    SystemAudioControl.unmuteVoiceFeedback();
-
     super.dispose();
   }
 

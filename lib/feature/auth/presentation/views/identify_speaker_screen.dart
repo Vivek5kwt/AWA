@@ -345,7 +345,16 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
               fontWeight: FontWeight.w600,
               color: widget.isDarkMode ? Colors.black : Colors.white),
         ),
-        onPressed: _goToAddSpeaker,
+        onPressed: (){
+          context.pushNamed(
+            'addContact',
+            extra: {
+              'name': '',
+              'phoneNumber': widget.phoneNumber,
+              'isDarkMode': widget.isDarkMode
+            },
+          );
+        },
       )
           : const SizedBox(),
       body: Container(
@@ -378,7 +387,14 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                     ? _NoSpeakersWidget(
                   isDarkMode: widget.isDarkMode,
                   phoneNumber: widget.phoneNumber,
-                  onAdd: _goToAddSpeaker,
+                  onAdd: () => context.pushNamed(
+                    'addContact',
+                    extra: {
+                      'name': '',
+                      'phoneNumber': widget.phoneNumber,
+                      'isDarkMode': widget.isDarkMode
+                    },
+                  ),
                 )
                     : ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
