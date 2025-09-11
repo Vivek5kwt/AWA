@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
@@ -38,6 +39,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _amplitudeTimer;
   late AnimationController _micGlowController;
   final AudioRecorder _recorder = AudioRecorder();
+  WebSocketChannel? _assemblyChannel;
+  StreamSubscription<Uint8List>? _audioStreamSub;
 
   final List<Map<String, dynamic>> _messages = [];
   int _speakerIndex = 0;
@@ -139,6 +142,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _amplitudeTimer?.cancel();
     _latestSentenceTimer?.cancel();
     _silenceTimer?.cancel();
+    _audioStreamSub?.cancel();
+    _assemblyChannel?.sink.close();
+    _recorder.dispose();
     _micGlowController.dispose();
     _textController.dispose();
     _flutterTts.stop();
@@ -206,8 +212,50 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
   }
 
+  Future<void> _initAssemblyConnection() async {
+    _assemblyChannel = WebSocketChannel.connect(
+      Uri.parse('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000'),
+    );
+
+    _assemblyChannel!.sink.add(jsonEncode({
+      'auth': 'YOUR_ASSEMBLY_AI_API_KEY',
+    }));
+
+    _assemblyChannel!.stream.listen((message) {
+      final data = jsonDecode(message);
+      final text = data['text'] as String? ?? '';
+      if (text.isEmpty) return;
+
+      if (data['message_type'] == 'partial_transcript') {
+        setState(() {
+          _latestSentence = text;
+        });
+      } else if (data['message_type'] == 'final_transcript') {
+        setState(() {
+          _latestSentence = text;
+          _messages.add({
+            'user': _myName,
+            'text': text,
+            'time': TimeOfDay.now().format(context),
+            'isMe': true,
+            'spoken': false,
+          });
+        });
+        if (_shouldAutoscroll) _scrollToBottom();
+        _latestSentenceTimer?.cancel();
+        _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+          setState(() {
+            _latestSentence = '';
+          });
+        });
+      }
+    });
+  }
+
   Future<void> _startListening() async {
     if (!await _recorder.hasPermission()) return;
+
+    await _initAssemblyConnection();
 
     setState(() {
       _isRecording = true;
@@ -223,20 +271,20 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       });
     });
 
-    _currentFilePath = _generateTempFilePath();
-    await _recorder.start(
-      RecordConfig(
-        encoder: AudioEncoder.wav,
-        bitRate: 256000,
-        sampleRate: 44100,
+    final stream = await _recorder.startStream(
+      const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: 16000,
         numChannels: 1,
       ),
-      path: _currentFilePath!,
     );
 
-
-
-    _continueRecordingCycle();
+    _audioStreamSub = stream.listen((data) {
+      final base64Chunk = base64Encode(data);
+      _assemblyChannel?.sink.add(jsonEncode({
+        "audio_data": base64Chunk,
+      }));
+    });
   }
 
   Future<void> _continueRecordingCycle() async {
@@ -307,29 +355,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
     _silenceTimer?.cancel();
     _amplitudeTimer?.cancel();
-
-    String? stoppedPath;
-    if (await _recorder.isRecording()) {
-      stoppedPath = await _recorder.stop();
-    } else if (_currentFilePath != null) {
-      stoppedPath = _currentFilePath;
-    }
-
-    if (stoppedPath != null) {
-      final file = File(stoppedPath);
-      if (await file.exists()) {
-        int durationSec = await _getWavDurationSeconds(file);
-        if (durationSec <= 19 && durationSec >= 1) {
-          final label = _audioLabel++;
-          bool shouldSend = await _isAudioSignificant(file);
-          if (shouldSend) {
-            _resetSilenceTimer();
-            _audioQueue.add(_AudioQueueItem(file: file, label: label));
-            _processAudioQueue();
-          }
-        }
-      }
-    }
+    await _audioStreamSub?.cancel();
+    await _recorder.stop();
+    _assemblyChannel?.sink.close();
   }
   Future<int> _getWavDurationSeconds(File file) async {
     try {
