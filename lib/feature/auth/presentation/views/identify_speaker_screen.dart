@@ -5,8 +5,6 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/utils/routing/routes.dart';
-
 class SpeakerScreen extends StatefulWidget {
   final String phoneNumber;
   final bool isDarkMode;
@@ -100,7 +98,6 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     await prefs.setString(_kSpeakersKey, data);
   }
 
-  // ===== Add / Delete (local) =====
   Future<void> _goToAddSpeaker() async {
     final result = await _showAddSpeakerDialog();
     if (result == null) return;
@@ -184,7 +181,6 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     );
   }
 
-  // ===== Add Speaker Dialog (local form) =====
   Future<_NewSpeakerFormResult?> _showAddSpeakerDialog() {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController(text: _email);
@@ -236,7 +232,7 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                       labelText: 'Voice samples (optional)',
                       hintText: '0',
                     ),
-                    keyboardType: TextInputType.number,
+keyboardType: TextInputType.number,
                   ),
                 ],
               ),
