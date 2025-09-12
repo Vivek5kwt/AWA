@@ -231,7 +231,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     required String text,
     required int start,
     required int end,
-    required String speaker,
+    String speaker = 'unknown',
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -277,10 +277,26 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
           final data = jsonDecode(message);
 
           if (data['type'] == 'PartialTranscript') {
-            print("✍️ Partial Transcript: ${data['text']}");
-            setState(() => _latestSentence = data['text']);
+            final text = data['text']?.toString() ?? '';
+            final start = data['start'] is int
+                ? data['start'] as int
+                : int.tryParse(data['start']?.toString() ?? '') ??
+                    (data['audio_start'] is int
+                        ? data['audio_start'] as int
+                        : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0);
+            final end = data['end'] is int
+                ? data['end'] as int
+                : int.tryParse(data['end']?.toString() ?? '') ??
+                    (data['audio_end'] is int
+                        ? data['audio_end'] as int
+                        : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0);
+            print("✍️ Partial Transcript: $text");
+            unawaited(
+                _sendTurnChunk(text: text, start: start, end: end));
+            setState(() => _latestSentence = text);
           } else if (data['type'] == 'FinalTranscript') {
-            print("✅ Final Transcript: ${data['text']}");
+            final text = data['text']?.toString() ?? '';
+            print("✅ Final Transcript: $text");
             final words = data['words'] as List? ?? [];
             if (words.isNotEmpty) {
               final List<Map<String, dynamic>> segments = [];
@@ -352,10 +368,24 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 if (_shouldAutoscroll) _scrollToBottom();
               }
             } else {
+              final start = data['start'] is int
+                  ? data['start'] as int
+                  : int.tryParse(data['start']?.toString() ?? '') ??
+                      (data['audio_start'] is int
+                          ? data['audio_start'] as int
+                          : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0);
+              final end = data['end'] is int
+                  ? data['end'] as int
+                  : int.tryParse(data['end']?.toString() ?? '') ??
+                      (data['audio_end'] is int
+                          ? data['audio_end'] as int
+                          : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0);
+              unawaited(
+                  _sendTurnChunk(text: text, start: start, end: end));
               setState(() {
                 _messages.add({
                   'user': _myName,
-                  'text': data['text'],
+                  'text': text,
                   'time': TimeOfDay.now().format(context),
                   'isMe': true,
                 });
