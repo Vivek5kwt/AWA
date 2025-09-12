@@ -510,6 +510,23 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _loginAsGuest() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('loggedIn', true);
+    await prefs.setBool('isOnboarded', true);
+    await prefs.setString('phoneNumber', 'guest');
+    await prefs.setString('name', 'Guest User');
+    await prefs.setString('email', '');
+    await prefs.setString('profilePhoto', '');
+    await prefs.setString('login_type', 'guest');
+    await prefs.setBool('isSubscribed', false);
+    if (!mounted) return;
+    context.goNamed(
+      Routes.homeScreen,
+      extra: 'guest',
+    );
+  }
+
   Widget _buildSocialButton({
     required String assetPath,
     required String text,
@@ -560,6 +577,34 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuestButton() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 46.0, vertical: 8.0),
+      child: ElevatedButton.icon(
+        onPressed: _loginAsGuest,
+        style: ElevatedButton.styleFrom(
+          foregroundColor: Colors.black87,
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8.0),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 14.0),
+          elevation: 4.0,
+          shadowColor: Colors.black45,
+        ),
+        icon: const Icon(Icons.person),
+        label: const Text(
+          'Continue as Guest',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -779,6 +824,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _onFacebookSignIn,
                   isLoading: _isFacebookLoading,
                 ),
+                _buildGuestButton(),
                 const SizedBox(height: 40),
               ],
             ),
