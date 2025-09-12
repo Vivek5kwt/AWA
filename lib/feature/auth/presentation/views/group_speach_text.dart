@@ -275,20 +275,27 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         print("📩 Message received: $message");
         try {
           final data = jsonDecode(message);
-          final msgType = data['message_type'] ?? data['type'];
+          final rawType = (data['message_type'] ?? data['type'] ?? '').toString();
+          final msgType = rawType.toLowerCase();
 
-          if (msgType == 'PartialTranscript') {
+          // Helper to safely parse ints from dynamic values
+          int _parseTime(dynamic v) {
+            if (v is int) return v;
+            return int.tryParse(v?.toString() ?? '') ?? 0;
+          }
+
+          if (msgType == 'partialtranscript' || msgType == 'partial_transcript') {
             final text = data['text']?.toString() ?? '';
-            // Partial transcripts are only used for UI; don't send to backend
-            final start = data['audio_start'] is int
-                ? data['audio_start'] as int
-                : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0;
-            final end = data['audio_end'] is int
-                ? data['audio_end'] as int
-                : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0;
-            print("✍️ Partial Transcript: $text [$start-$end]");
+            final start = _parseTime(data['audio_start']);
+            final end = _parseTime(data['audio_end']);
+            final spId = data['speaker']?.toString() ?? 'unknown';
+            final spName = _getSpeakerName(spId);
+            print("✍️ Partial Transcript: $text [$start-$end] ($spName)");
             setState(() => _latestSentence = text);
-          } else if (msgType == 'FinalTranscript') {
+            unawaited(_sendTurnChunk(
+                text: text, start: start, end: end, speaker: spName));
+          } else if (msgType == 'finaltranscript' ||
+              msgType == 'final_transcript') {
             final text = data['text']?.toString() ?? '';
             print("✅ Final Transcript: $text");
             final words = data['words'] as List? ?? [];
@@ -362,14 +369,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 if (_shouldAutoscroll) _scrollToBottom();
               }
             } else {
-              final start = data['audio_start'] is int
-                  ? data['audio_start'] as int
-                  : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0;
-              final end = data['audio_end'] is int
-                  ? data['audio_end'] as int
-                  : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0;
-              unawaited(_sendTurnChunk(
-                  text: text, start: start, end: end, speaker: _myName));
+              final start = _parseTime(data['audio_start']);
+              final end = _parseTime(data['audio_end']);
+              unawaited(
+                  _sendTurnChunk(text: text, start: start, end: end, speaker: _myName));
               setState(() {
                 _messages.add({
                   'user': _myName,
@@ -381,17 +384,19 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               });
             if (_shouldAutoscroll) _scrollToBottom();
           }
-          } else if (msgType == 'turn' || msgType == 'Turn') {
+          } else if (msgType == 'turndetected' ||
+              msgType == 'turn' ||
+              msgType == 'turn_detected') {
             final text = data['text']?.toString() ?? '';
-            final start = data['audio_start'] is int
-                ? data['audio_start'] as int
-                : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0;
-            final end = data['audio_end'] is int
-                ? data['audio_end'] as int
-                : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0;
-            print("🔁 Turn event: $text [$start-$end]");
+            final start = _parseTime(data['audio_start']);
+            final end = _parseTime(data['audio_end']);
+            final spId = data['speaker']?.toString() ?? 'unknown';
+            final spName = _getSpeakerName(spId);
+            print("🔀 Turn detected for $spName: $text [$start-$end]");
+            unawaited(
+                _sendTurnChunk(text: text, start: start, end: end, speaker: spName));
           } else {
-            print("ℹ️ Other message type: ${data['type']}");
+            print("ℹ️ Other message type: $rawType");
           }
         } catch (e) {
           print("❌ Failed to parse: $e");
