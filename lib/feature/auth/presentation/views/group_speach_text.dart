@@ -379,8 +379,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 });
                 _latestSentence = '';
               });
-              if (_shouldAutoscroll) _scrollToBottom();
-            }
+            if (_shouldAutoscroll) _scrollToBottom();
+          }
+          } else if (msgType == 'turn' || msgType == 'Turn') {
+            final text = data['text']?.toString() ?? '';
+            final start = data['audio_start'] is int
+                ? data['audio_start'] as int
+                : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0;
+            final end = data['audio_end'] is int
+                ? data['audio_end'] as int
+                : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0;
+            print("🔁 Turn event: $text [$start-$end]");
           } else {
             print("ℹ️ Other message type: ${data['type']}");
           }
@@ -414,13 +423,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       });
     });
 
-    final stream = await _recorder.startStream(
-      const RecordConfig(
-        encoder: AudioEncoder.pcm16bits,
-        sampleRate: 16000,
-        numChannels: 1,
-      ),
+    final config = const RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
+      sampleRate: 16000,
+      numChannels: 1,
     );
+    print('🎙️ Recorder config: 16kHz mono PCM16');
+    final stream = await _recorder.startStream(config);
 
     _audioStreamSub = stream.listen((data) {
       if (_assemblyChannel != null) {

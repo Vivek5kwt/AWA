@@ -306,9 +306,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _checkAndUpdateSubscription({bool showSnackBar = false}) async {
     try {
-      final resp = await http.get(Uri.parse(
-          '${ApiConstants.baseUrl}/check_subscription/?email=$_email'));
-      print('sjjjsjasjj ${resp.statusCode}');
+      final uri = Uri.parse('${ApiConstants.baseUrl}/check_subscription')
+          .replace(queryParameters: {'email': _email});
+      final resp =
+          await http.get(uri).timeout(const Duration(seconds: 8));
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body);
         final subscribed = data['subscribed'] == true;
@@ -354,6 +355,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           }
         }
       }
+    } on SocketException catch (e) {
+      debugPrint('Subscription check failed: $e');
+    } on TimeoutException catch (e) {
+      debugPrint('Subscription check timed out: $e');
     } catch (e) {
       debugPrint('Subscription check failed: $e');
     }
