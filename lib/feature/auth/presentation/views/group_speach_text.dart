@@ -61,6 +61,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   final FlutterTts _flutterTts = FlutterTts();
 
   String _appLanguageCode = 'en';
+  String? _detectedLanguage;
 
   bool _speakOnMeeting = true;
   bool _showTextMyLanguage = false;
@@ -275,8 +276,18 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         print("📩 Message received: $message");
         try {
           final data = jsonDecode(message);
+          final type = data['type']?.toString() ?? '';
 
-          if (data['type'] == 'PartialTranscript') {
+          if (type == 'SessionBegins' || type == 'session_begins') {
+            print('🔔 Session started: ' + (data['session_id']?.toString() ?? ''));
+            if (data['language'] != null) {
+              _detectedLanguage = data['language'].toString();
+              print('🔤 Language: ' + _detectedLanguage!);
+            }
+          } else if (type == 'LanguageDetected' || type == 'language_detected') {
+            _detectedLanguage = data['language']?.toString();
+            print('🔤 Language: ' + (_detectedLanguage ?? 'unknown'));
+          } else if (type == 'PartialTranscript') {
             final text = data['text']?.toString() ?? '';
             final start = data['start'] is int
                 ? data['start'] as int
@@ -294,7 +305,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             unawaited(
                 _sendTurnChunk(text: text, start: start, end: end));
             setState(() => _latestSentence = text);
-          } else if (data['type'] == 'FinalTranscript') {
+          } else if (type == 'FinalTranscript') {
             final text = data['text']?.toString() ?? '';
             print("✅ Final Transcript: $text");
             final words = data['words'] as List? ?? [];
@@ -394,7 +405,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
               if (_shouldAutoscroll) _scrollToBottom();
             }
           } else {
-            print("ℹ️ Other message type: ${data['type']}");
+            print("ℹ️ Other message type: ${type}");
           }
         } catch (e) {
           print("❌ Failed to parse: $e");
