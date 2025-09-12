@@ -41,6 +41,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   final AudioRecorder _recorder = AudioRecorder();
   IOWebSocketChannel? _assemblyChannel;
   StreamSubscription<Uint8List>? _audioStreamSub;
+  final List<int> _pcmBuffer = [];
+  Timer? _keepAliveTimer;
+  int _reconnectAttempts = 0;
+  String? _sessionLanguage;
+
+  // AssemblyAI API key used for Authorization header when connecting over WebSocket.
+  static const String _assemblyApiKey = '2e2658a6407841d195ab268060d19b7e';
 
   final List<Map<String, dynamic>> _messages = [];
   int _speakerIndex = 0;
@@ -145,6 +152,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _latestSentenceTimer?.cancel();
     _silenceTimer?.cancel();
     _audioStreamSub?.cancel();
+    _keepAliveTimer?.cancel();
     _assemblyChannel?.sink.close();
     _recorder.dispose();
     _micGlowController.dispose();
@@ -216,7 +224,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   String _getSpeakerName(String speakerId) {
     return _speakerNames.putIfAbsent(
-        speakerId, () => 'speaker${_speakerNames.length + 1}');
+        speakerId, () => 'Speaker${_speakerNames.length + 1}');
   }
 
   Color _getSpeakerColor(String speakerId) {
@@ -256,162 +264,151 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _initAssemblyConnection() async {
     try {
       final url =
-          'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&encoding=pcm_s16le&format_turns=true';
+          'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&encoding=pcm_s16le&format_turns=true&language_detection=true';
 
       print("🔌 Connecting to: $url");
 
+      _keepAliveTimer?.cancel();
       _assemblyChannel = IOWebSocketChannel.connect(
         Uri.parse(url),
         headers: {
           // For production you should use an ephemeral token instead of your permanent key.
-          'Authorization': '2e2658a6407841d195ab268060d19b7e',
+          'Authorization': _assemblyApiKey,
         },
         pingInterval: const Duration(seconds: 15),
       );
 
-      print("  Connected to AssemblyAI Universal Streaming. Waiting for messages...");
+      print("  Connected to AssemblyAI. Waiting for messages...");
+
+      _keepAliveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        _assemblyChannel?.sink.add(jsonEncode({'type': 'Ping'}));
+      });
 
       _assemblyChannel!.stream.listen((message) async {
-        print("📩 Message received: $message");
+        // Log every raw JSON message from AssemblyAI for debugging.
+        print("⬅️ Raw: $message");
         try {
           final data = jsonDecode(message);
-          final rawType = (data['message_type'] ?? data['type'] ?? '').toString();
-          final msgType = rawType.toLowerCase();
+          final type = (data['type'] ?? data['message_type'] ?? '').toString();
 
-          // Helper to safely parse ints from dynamic values
-          int _parseTime(dynamic v) {
-            if (v is int) return v;
-            return int.tryParse(v?.toString() ?? '') ?? 0;
+          if (data['language_code'] != null) {
+            _sessionLanguage = data['language_code'].toString();
+            print('🌐 language_code: $_sessionLanguage');
           }
 
-          if (msgType == 'partialtranscript' || msgType == 'partial_transcript') {
-            final text = data['text']?.toString() ?? '';
-            final start = _parseTime(data['audio_start']);
-            final end = _parseTime(data['audio_end']);
-            final spId = data['speaker']?.toString() ?? 'unknown';
-            final spName = _getSpeakerName(spId);
-            print("✍️ Partial Transcript: $text [$start-$end] ($spName)");
-            setState(() => _latestSentence = text);
-            unawaited(_sendTurnChunk(
-                text: text, start: start, end: end, speaker: spName));
-          } else if (msgType == 'finaltranscript' ||
-              msgType == 'final_transcript') {
-            final text = data['text']?.toString() ?? '';
-            print("✅ Final Transcript: $text");
-            final words = data['words'] as List? ?? [];
-            if (words.isNotEmpty) {
-              final List<Map<String, dynamic>> segments = [];
-              String? currentSpeaker;
-              int? segStart;
-              int? segEnd;
-              final buffer = StringBuffer();
-              for (final w in words) {
-                final sp = w['speaker']?.toString() ?? 'unknown';
-                final wStart = w['start'] is int
-                    ? w['start'] as int
-                    : int.tryParse(w['start'].toString()) ?? 0;
-                final wEnd = w['end'] is int
-                    ? w['end'] as int
-                    : int.tryParse(w['end'].toString()) ?? 0;
-                final wText = w['text']?.toString() ?? '';
-                if (currentSpeaker == null) {
-                  currentSpeaker = sp;
-                  segStart = wStart;
-                } else if (sp != currentSpeaker) {
-                  segments.add({
-                    'speaker': currentSpeaker,
-                    'start': segStart ?? 0,
-                    'end': segEnd ?? segStart ?? 0,
-                    'text': buffer.toString().trim(),
-                  });
-                  buffer.clear();
-                  currentSpeaker = sp;
-                  segStart = wStart;
-                }
-                segEnd = wEnd;
-                buffer.write('$wText ');
-              }
-              if (currentSpeaker != null) {
-                segments.add({
-                  'speaker': currentSpeaker,
-                  'start': segStart ?? 0,
-                  'end': segEnd ?? segStart ?? 0,
-                  'text': buffer.toString().trim(),
-                });
-              }
-              final newMessages = <Map<String, dynamic>>[];
-              for (final seg in segments) {
-                final spId = seg['speaker'] as String;
-                final spName = _getSpeakerName(spId);
-                final spColor = _getSpeakerColor(spId);
-                final segText = seg['text'] as String;
-                final segStart = seg['start'] as int;
-                final segEnd = seg['end'] as int;
-                print('🗣️ $spName [$segStart-$segEnd]: $segText');
-                unawaited(_sendTurnChunk(
-                    text: segText,
-                    start: segStart,
-                    end: segEnd,
-                    speaker: spName));
-                newMessages.add({
-                  'user': spName,
-                  'text': segText,
-                  'time': TimeOfDay.now().format(context),
-                  'isMe': false,
-                  'color': spColor,
-                });
-              }
-              if (newMessages.isNotEmpty) {
-                setState(() {
-                  _messages.addAll(newMessages);
-                  _latestSentence = '';
-                });
-                if (_shouldAutoscroll) _scrollToBottom();
-              }
-            } else {
+          // Helper to safely parse ints from dynamic values
+          int _parseTime(dynamic v) =>
+              v is int ? v : int.tryParse(v?.toString() ?? '') ?? 0;
+
+          switch (type) {
+            case 'PartialTranscript':
+              final text = data['text']?.toString() ?? '';
+              print('📝 PartialTranscript: $text');
+              setState(() => _latestSentence = text);
+              break;
+            case 'FinalTranscript':
+              final text = data['text']?.toString() ?? '';
               final start = _parseTime(data['audio_start']);
               final end = _parseTime(data['audio_end']);
-              unawaited(
-                  _sendTurnChunk(text: text, start: start, end: end, speaker: _myName));
+              final wordSpeaker =
+                  (data['words'] as List?)?.first['speaker']?.toString();
+              final spId = data['speaker']?.toString() ?? wordSpeaker;
+              String spName;
+              Color spColor = _myColor;
+              bool isMe = false;
+              if (spId == null || spId == 'unknown') {
+                spName = _myName;
+                isMe = true;
+              } else {
+                spName = _getSpeakerName(spId);
+                spColor = _getSpeakerColor(spId);
+              }
+              print('✅ FinalTranscript [$start-$end] $spName: $text');
+              unawaited(_sendTurnChunk(
+                  text: text, start: start, end: end, speaker: spName));
               setState(() {
                 _messages.add({
-                  'user': _myName,
+                  'user': spName,
                   'text': text,
                   'time': TimeOfDay.now().format(context),
-                  'isMe': true,
+                  'isMe': isMe,
+                  'color': spColor,
                 });
                 _latestSentence = '';
               });
-            if (_shouldAutoscroll) _scrollToBottom();
-          }
-          } else if (msgType == 'turndetected' ||
-              msgType == 'turn' ||
-              msgType == 'turn_detected') {
-            final text = data['text']?.toString() ?? '';
-            final start = _parseTime(data['audio_start']);
-            final end = _parseTime(data['audio_end']);
-            final spId = data['speaker']?.toString() ?? 'unknown';
-            final spName = _getSpeakerName(spId);
-            print("🔀 Turn detected for $spName: $text [$start-$end]");
-            unawaited(
-                _sendTurnChunk(text: text, start: start, end: end, speaker: spName));
-          } else {
-            print("ℹ️ Other message type: $rawType");
+              if (_shouldAutoscroll) _scrollToBottom();
+              break;
+            case 'TurnDetected':
+              final start = _parseTime(data['audio_start']);
+              final end = _parseTime(data['audio_end']);
+              final spId = data['speaker']?.toString() ?? 'unknown';
+              final spName = _getSpeakerName(spId);
+              print('🔀 TurnDetected $spName [$start-$end]');
+              unawaited(
+                  _sendTurnChunk(text: '', start: start, end: end, speaker: spName));
+              break;
+            case 'SessionBegins':
+              print('🚀 Session begins');
+              break;
+            case 'SessionEnded':
+              print('🏁 Session ended');
+              break;
+            case 'Error':
+              print('⚠️ Error from AssemblyAI: $message');
+              final err = data['error']?.toString() ?? 'Unknown error';
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('AssemblyAI error: $err'),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+              break;
+            default:
+              print('ℹ️ Other message type: $type');
           }
         } catch (e) {
-          print("❌ Failed to parse: $e");
+          print('❌ Failed to parse: $e');
+        }
+      }, onError: (error) {
+        print('⚠️ WebSocket error: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('WebSocket error: $error'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }, onDone: () {
+        _keepAliveTimer?.cancel();
+        print('🔚 WebSocket connection closed');
+        if (_isRecording && _reconnectAttempts < 2) {
+          _reconnectAttempts++;
+          print('🔄 Reconnecting... ($_reconnectAttempts)');
+          _initAssemblyConnection();
         }
       });
 
 
     } catch (e, st) {
       print("❌ Connection failed: $e\n$st");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Connection failed: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _startListening() async {
     if (!await _recorder.hasPermission()) return;
 
+    _reconnectAttempts = 0;
     await _initAssemblyConnection();
 
     setState(() {
@@ -432,14 +429,38 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       encoder: AudioEncoder.pcm16bits,
       sampleRate: 16000,
       numChannels: 1,
+      androidConfig: AndroidRecordConfig(
+        audioSource: AndroidAudioSource.voiceRecognition,
+      ),
     );
-    print('🎙️ Recorder config: 16kHz mono PCM16');
+    print('🎙️ Recorder config: 16kHz mono PCM16 (voiceRecognition source)');
     final stream = await _recorder.startStream(config);
 
+    const frameBytes = 3200; // 100ms of 16kHz mono PCM16
     _audioStreamSub = stream.listen((data) {
-      if (_assemblyChannel != null) {
-        final base64Chunk = base64Encode(data);
-        print("🎤 Sending ${data.length} bytes");
+      if (_assemblyChannel == null) return;
+      final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+      _pcmBuffer.addAll(bytes);
+      while (_pcmBuffer.length >= frameBytes) {
+        final chunk = Uint8List.fromList(_pcmBuffer.sublist(0, frameBytes));
+        _pcmBuffer.removeRange(0, frameBytes);
+        final bd = ByteData.sublistView(chunk);
+        double sum = 0;
+        for (int i = 0; i < frameBytes; i += 2) {
+          sum += bd.getInt16(i, Endian.little).abs();
+        }
+        final avgAmp = sum / (frameBytes / 2);
+        final firstBytes = chunk
+            .take(8)
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ');
+        print('Avg amplitude: ${avgAmp.toStringAsFixed(2)}');
+        if (chunk.every((b) => b == 0)) {
+          print("⚠️ Skipping silent chunk | $firstBytes");
+          continue;
+        }
+        print("🎤 Sending ${chunk.length} bytes | $firstBytes");
+        final base64Chunk = base64Encode(chunk);
         _assemblyChannel!.sink.add(jsonEncode({
           "audio_data": base64Chunk,
         }));
@@ -518,7 +539,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _amplitudeTimer?.cancel();
     await _audioStreamSub?.cancel();
     await _recorder.stop();
-    _assemblyChannel?.sink.close();
+    _keepAliveTimer?.cancel();
+    if (_assemblyChannel != null) {
+      // Signal the end of audio so AssemblyAI can finalize transcripts.
+      _assemblyChannel!.sink.add(jsonEncode({"type": "Close"}));
+      await Future.delayed(const Duration(milliseconds: 100));
+      await _assemblyChannel!.sink.close();
+    }
   }
 
   Future<int> _getWavDurationSeconds(File file) async {
