@@ -252,6 +252,21 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
 
+  /// Ensures outgoing audio chunks are little-endian PCM16.
+  /// Some platforms may provide PCM data in a different endianness, so we
+  /// explicitly rewrite each 16-bit sample as little endian before sending it
+  /// to AssemblyAI.
+  Uint8List _toPCM16LE(Uint8List data) {
+    final input = ByteData.sublistView(data);
+    final out = Uint8List(data.length);
+    final output = ByteData.sublistView(out);
+    for (int i = 0; i < data.length ~/ 2; i++) {
+      final sample = input.getInt16(i * 2, Endian.little);
+      output.setInt16(i * 2, sample, Endian.little);
+    }
+    return out;
+  }
+
   // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
   Future<void> _initAssemblyConnection() async {
     try {
@@ -395,12 +410,19 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             print("🔀 Turn detected for $spName: $text [$start-$end]");
             unawaited(
                 _sendTurnChunk(text: text, start: start, end: end, speaker: spName));
+          } else if (msgType == 'sessionbegins' ||
+              msgType == 'session_begins') {
+            print('🚀 Session begins');
           } else {
             print("ℹ️ Other message type: $rawType");
           }
         } catch (e) {
           print("❌ Failed to parse: $e");
         }
+      }, onError: (error) {
+        print('⚠️ WebSocket error: $error');
+      }, onDone: () {
+        print('🔚 WebSocket connection closed');
       });
 
 
@@ -438,8 +460,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
     _audioStreamSub = stream.listen((data) {
       if (_assemblyChannel != null) {
-        final base64Chunk = base64Encode(data);
-        print("🎤 Sending ${data.length} bytes");
+        final pcmBytes = _toPCM16LE(data);
+        final base64Chunk = base64Encode(pcmBytes);
+        print("🎤 Sending ${pcmBytes.length} bytes");
         _assemblyChannel!.sink.add(jsonEncode({
           "audio_data": base64Chunk,
         }));
