@@ -41,6 +41,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   final AudioRecorder _recorder = AudioRecorder();
   IOWebSocketChannel? _assemblyChannel;
   StreamSubscription<Uint8List>? _audioStreamSub;
+  final List<int> _pcmBuffer = [];
 
   final List<Map<String, dynamic>> _messages = [];
   int _speakerIndex = 0;
@@ -252,6 +253,33 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
 
+  /// Convert incoming float or host-endian PCM bytes to little-endian PCM16.
+  Uint8List _toPCM16LE(List<int> data) {
+    final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+    // If the recorder delivered Float32 samples, convert each to Int16.
+    if (bytes.length % 4 == 0) {
+      final floatView = ByteData.sublistView(bytes);
+      final sampleCount = bytes.length ~/ 4;
+      final out = Uint8List(sampleCount * 2);
+      final outBD = ByteData.sublistView(out);
+      for (int i = 0; i < sampleCount; i++) {
+        final f = floatView.getFloat32(i * 4, Endian.little);
+        final s = (f.clamp(-1.0, 1.0) * 32767.0).round().toInt();
+        outBD.setInt16(i * 2, s, Endian.little);
+      }
+      return out;
+    }
+    // Otherwise assume Int16 samples and ensure little-endian order.
+    final input = ByteData.sublistView(bytes);
+    final out = Uint8List(bytes.length);
+    final output = ByteData.sublistView(out);
+    for (int i = 0; i < bytes.length ~/ 2; i++) {
+      final sample = input.getInt16(i * 2, Endian.little);
+      output.setInt16(i * 2, sample, Endian.little);
+    }
+    return out;
+  }
+
   // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
   Future<void> _initAssemblyConnection() async {
     try {
@@ -371,8 +399,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             } else {
               final start = _parseTime(data['audio_start']);
               final end = _parseTime(data['audio_end']);
-              unawaited(
-                  _sendTurnChunk(text: text, start: start, end: end, speaker: _myName));
+              unawaited(_sendTurnChunk(
+                  text: text, start: start, end: end, speaker: _myName));
               setState(() {
                 _messages.add({
                   'user': _myName,
@@ -382,8 +410,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 });
                 _latestSentence = '';
               });
-            if (_shouldAutoscroll) _scrollToBottom();
-          }
+              if (_shouldAutoscroll) _scrollToBottom();
+            }
           } else if (msgType == 'turndetected' ||
               msgType == 'turn' ||
               msgType == 'turn_detected') {
@@ -395,12 +423,24 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             print("🔀 Turn detected for $spName: $text [$start-$end]");
             unawaited(
                 _sendTurnChunk(text: text, start: start, end: end, speaker: spName));
+          } else if (msgType == 'sessionbegins' ||
+              msgType == 'session_begins') {
+            print('🚀 Session begins');
+          } else if (msgType == 'sessionended' ||
+              msgType == 'session_ended') {
+            print('🏁 Session ended');
+          } else if (msgType == 'error') {
+            print('⚠️ Error from AssemblyAI: ${data['error'] ?? message}');
           } else {
             print("ℹ️ Other message type: $rawType");
           }
         } catch (e) {
           print("❌ Failed to parse: $e");
         }
+      }, onError: (error) {
+        print('⚠️ WebSocket error: $error');
+      }, onDone: () {
+        print('🔚 WebSocket connection closed');
       });
 
 
@@ -436,10 +476,22 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     print('🎙️ Recorder config: 16kHz mono PCM16');
     final stream = await _recorder.startStream(config);
 
+    const frameBytes = 640; // 320 samples @ 16-bit
     _audioStreamSub = stream.listen((data) {
-      if (_assemblyChannel != null) {
-        final base64Chunk = base64Encode(data);
-        print("🎤 Sending ${data.length} bytes");
+      if (_assemblyChannel == null) return;
+      final pcmBytes = _toPCM16LE(data);
+      _pcmBuffer.addAll(pcmBytes);
+      while (_pcmBuffer.length >= frameBytes) {
+        final chunk = Uint8List.fromList(_pcmBuffer.sublist(0, frameBytes));
+        _pcmBuffer.removeRange(0, frameBytes);
+        final base64Chunk = base64Encode(chunk);
+        final firstBytes = chunk
+            .take(8)
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ');
+        final hasAudio = chunk.any((b) => b != 0);
+        print(
+            "🎤 Sending ${chunk.length} bytes${hasAudio ? '' : ' (all zeros)'} | $firstBytes");
         _assemblyChannel!.sink.add(jsonEncode({
           "audio_data": base64Chunk,
         }));
