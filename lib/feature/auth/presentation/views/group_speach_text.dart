@@ -304,6 +304,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _assemblyChannel!.sink.add(jsonEncode({
         'type': 'SessionBegins',
         'sample_rate': 16000,
+        'encoding': 'pcm_s16le',
         'format_turns': true,
         'language_detection': true,
       }));
