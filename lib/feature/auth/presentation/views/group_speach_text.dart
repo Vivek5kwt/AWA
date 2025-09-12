@@ -41,6 +41,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   final AudioRecorder _recorder = AudioRecorder();
   IOWebSocketChannel? _assemblyChannel;
   StreamSubscription<Uint8List>? _audioStreamSub;
+  final List<int> _pcmBuffer = [];
+
+  // AssemblyAI API key used for Authorization header when connecting over WebSocket.
+  static const String _assemblyApiKey = '2e2658a6407841d195ab268060d19b7e';
 
   final List<Map<String, dynamic>> _messages = [];
   int _speakerIndex = 0;
@@ -252,6 +256,33 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
 
+  /// Convert incoming float or host-endian PCM bytes to little-endian PCM16.
+  Uint8List _toPCM16LE(List<int> data) {
+    final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+    // If the recorder delivered Float32 samples, convert each to Int16.
+    if (bytes.length % 4 == 0) {
+      final floatView = ByteData.sublistView(bytes);
+      final sampleCount = bytes.length ~/ 4;
+      final out = Uint8List(sampleCount * 2);
+      final outBD = ByteData.sublistView(out);
+      for (int i = 0; i < sampleCount; i++) {
+        final f = floatView.getFloat32(i * 4, Endian.little);
+        final s = (f.clamp(-1.0, 1.0) * 32767.0).round().toInt();
+        outBD.setInt16(i * 2, s, Endian.little);
+      }
+      return out;
+    }
+    // Otherwise assume Int16 samples and ensure little-endian order.
+    final input = ByteData.sublistView(bytes);
+    final out = Uint8List(bytes.length);
+    final output = ByteData.sublistView(out);
+    for (int i = 0; i < bytes.length ~/ 2; i++) {
+      final sample = input.getInt16(i * 2, Endian.little);
+      output.setInt16(i * 2, sample, Endian.little);
+    }
+    return out;
+  }
+
   // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
   Future<void> _initAssemblyConnection() async {
     try {
@@ -264,15 +295,24 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         Uri.parse(url),
         headers: {
           // For production you should use an ephemeral token instead of your permanent key.
-          'Authorization': '2e2658a6407841d195ab268060d19b7e',
+          'Authorization': _assemblyApiKey,
         },
         pingInterval: const Duration(seconds: 15),
       );
 
+      // Explicitly begin the session so AssemblyAI knows our stream params.
+      _assemblyChannel!.sink.add(jsonEncode({
+        'type': 'SessionBegins',
+        'sample_rate': 16000,
+        'format_turns': true,
+        'language_detection': true,
+      }));
+      print('➡️ Sent SessionBegins');
       print("  Connected to AssemblyAI Universal Streaming. Waiting for messages...");
 
       _assemblyChannel!.stream.listen((message) async {
-        print("📩 Message received: $message");
+        // Log every raw JSON message from AssemblyAI for debugging.
+        print("⬅️ Raw: $message");
         try {
           final data = jsonDecode(message);
           final rawType = (data['message_type'] ?? data['type'] ?? '').toString();
@@ -286,18 +326,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
           if (msgType == 'partialtranscript' || msgType == 'partial_transcript') {
             final text = data['text']?.toString() ?? '';
-            final start = _parseTime(data['audio_start']);
-            final end = _parseTime(data['audio_end']);
-            final spId = data['speaker']?.toString() ?? 'unknown';
-            final spName = _getSpeakerName(spId);
-            print("✍️ Partial Transcript: $text [$start-$end] ($spName)");
+            // Print partial transcript text live.
+            print("📝 PartialTranscript: $text");
             setState(() => _latestSentence = text);
-            unawaited(_sendTurnChunk(
-                text: text, start: start, end: end, speaker: spName));
           } else if (msgType == 'finaltranscript' ||
               msgType == 'final_transcript') {
             final text = data['text']?.toString() ?? '';
-            print("✅ Final Transcript: $text");
+            print("✅ FinalTranscript: $text");
+            final start = _parseTime(data['audio_start']);
+            final end = _parseTime(data['audio_end']);
             final words = data['words'] as List? ?? [];
             if (words.isNotEmpty) {
               final List<Map<String, dynamic>> segments = [];
@@ -371,8 +408,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             } else {
               final start = _parseTime(data['audio_start']);
               final end = _parseTime(data['audio_end']);
-              unawaited(
-                  _sendTurnChunk(text: text, start: start, end: end, speaker: _myName));
+              unawaited(_sendTurnChunk(
+                  text: text, start: start, end: end, speaker: _myName));
               setState(() {
                 _messages.add({
                   'user': _myName,
@@ -382,25 +419,37 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 });
                 _latestSentence = '';
               });
-            if (_shouldAutoscroll) _scrollToBottom();
-          }
+              if (_shouldAutoscroll) _scrollToBottom();
+            }
           } else if (msgType == 'turndetected' ||
               msgType == 'turn' ||
               msgType == 'turn_detected') {
-            final text = data['text']?.toString() ?? '';
             final start = _parseTime(data['audio_start']);
             final end = _parseTime(data['audio_end']);
             final spId = data['speaker']?.toString() ?? 'unknown';
             final spName = _getSpeakerName(spId);
-            print("🔀 Turn detected for $spName: $text [$start-$end]");
+            // Log detected speaker turn with timing information.
+            print("🔀 TurnDetected $start-$end by $spName");
             unawaited(
-                _sendTurnChunk(text: text, start: start, end: end, speaker: spName));
+                _sendTurnChunk(text: '', start: start, end: end, speaker: spName));
+          } else if (msgType == 'sessionbegins' ||
+              msgType == 'session_begins') {
+            print('🚀 Session begins');
+          } else if (msgType == 'sessionended' ||
+              msgType == 'session_ended') {
+            print('🏁 Session ended');
+          } else if (msgType == 'error') {
+            print('⚠️ Error from AssemblyAI: ${data['error'] ?? message}');
           } else {
             print("ℹ️ Other message type: $rawType");
           }
         } catch (e) {
           print("❌ Failed to parse: $e");
         }
+      }, onError: (error) {
+        print('⚠️ WebSocket error: $error');
+      }, onDone: () {
+        print('🔚 WebSocket connection closed');
       });
 
 
@@ -432,14 +481,39 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       encoder: AudioEncoder.pcm16bits,
       sampleRate: 16000,
       numChannels: 1,
+      androidConfig: AndroidRecordConfig(
+        audioSource: AndroidAudioSource.voiceRecognition,
+      ),
     );
-    print('🎙️ Recorder config: 16kHz mono PCM16');
+    print('🎙️ Recorder config: 16kHz mono PCM16 (voiceRecognition source)');
     final stream = await _recorder.startStream(config);
 
+    const frameBytes = 640; // 320 samples @ 16-bit
     _audioStreamSub = stream.listen((data) {
-      if (_assemblyChannel != null) {
-        final base64Chunk = base64Encode(data);
-        print("🎤 Sending ${data.length} bytes");
+      if (_assemblyChannel == null) return;
+      final pcmBytes = _toPCM16LE(data);
+      _pcmBuffer.addAll(pcmBytes);
+      while (_pcmBuffer.length >= frameBytes) {
+        final chunk = Uint8List.fromList(_pcmBuffer.sublist(0, frameBytes));
+        _pcmBuffer.removeRange(0, frameBytes);
+        final bd = ByteData.sublistView(chunk);
+        double sum = 0;
+        for (int i = 0; i < frameBytes; i += 2) {
+          sum += bd.getInt16(i, Endian.little).abs();
+        }
+        final avgAmp = sum / (frameBytes / 2);
+        final firstBytes = chunk
+            .take(8)
+            .map((b) => b.toRadixString(16).padLeft(2, '0'))
+            .join(' ');
+        print('Avg amplitude: ${avgAmp.toStringAsFixed(2)}');
+        final hasAudio = avgAmp > 0;
+        if (!hasAudio) {
+          print("⚠️ Skipping silent chunk | $firstBytes");
+          continue;
+        }
+        print("🎤 Sending ${chunk.length} bytes | $firstBytes");
+        final base64Chunk = base64Encode(chunk);
         _assemblyChannel!.sink.add(jsonEncode({
           "audio_data": base64Chunk,
         }));
@@ -518,7 +592,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _amplitudeTimer?.cancel();
     await _audioStreamSub?.cancel();
     await _recorder.stop();
-    _assemblyChannel?.sink.close();
+    if (_assemblyChannel != null) {
+      // Signal the end of audio so AssemblyAI can finalize transcripts.
+      _assemblyChannel!.sink.add(jsonEncode({"type": "Close"}));
+      await Future.delayed(const Duration(milliseconds: 100));
+      await _assemblyChannel!.sink.close();
+    }
   }
 
   Future<int> _getWavDurationSeconds(File file) async {
