@@ -275,26 +275,20 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         print("📩 Message received: $message");
         try {
           final data = jsonDecode(message);
+          final msgType = data['message_type'] ?? data['type'];
 
-          if (data['type'] == 'PartialTranscript') {
+          if (msgType == 'PartialTranscript') {
             final text = data['text']?.toString() ?? '';
-            final start = data['start'] is int
-                ? data['start'] as int
-                : int.tryParse(data['start']?.toString() ?? '') ??
-                    (data['audio_start'] is int
-                        ? data['audio_start'] as int
-                        : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0);
-            final end = data['end'] is int
-                ? data['end'] as int
-                : int.tryParse(data['end']?.toString() ?? '') ??
-                    (data['audio_end'] is int
-                        ? data['audio_end'] as int
-                        : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0);
-            print("✍️ Partial Transcript: $text");
-            unawaited(
-                _sendTurnChunk(text: text, start: start, end: end));
+            // Partial transcripts are only used for UI; don't send to backend
+            final start = data['audio_start'] is int
+                ? data['audio_start'] as int
+                : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0;
+            final end = data['audio_end'] is int
+                ? data['audio_end'] as int
+                : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0;
+            print("✍️ Partial Transcript: $text [$start-$end]");
             setState(() => _latestSentence = text);
-          } else if (data['type'] == 'FinalTranscript') {
+          } else if (msgType == 'FinalTranscript') {
             final text = data['text']?.toString() ?? '';
             print("✅ Final Transcript: $text");
             final words = data['words'] as List? ?? [];
@@ -368,20 +362,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 if (_shouldAutoscroll) _scrollToBottom();
               }
             } else {
-              final start = data['start'] is int
-                  ? data['start'] as int
-                  : int.tryParse(data['start']?.toString() ?? '') ??
-                      (data['audio_start'] is int
-                          ? data['audio_start'] as int
-                          : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0);
-              final end = data['end'] is int
-                  ? data['end'] as int
-                  : int.tryParse(data['end']?.toString() ?? '') ??
-                      (data['audio_end'] is int
-                          ? data['audio_end'] as int
-                          : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0);
-              unawaited(
-                  _sendTurnChunk(text: text, start: start, end: end));
+              final start = data['audio_start'] is int
+                  ? data['audio_start'] as int
+                  : int.tryParse(data['audio_start']?.toString() ?? '') ?? 0;
+              final end = data['audio_end'] is int
+                  ? data['audio_end'] as int
+                  : int.tryParse(data['audio_end']?.toString() ?? '') ?? 0;
+              unawaited(_sendTurnChunk(
+                  text: text, start: start, end: end, speaker: _myName));
               setState(() {
                 _messages.add({
                   'user': _myName,
