@@ -252,6 +252,22 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
 
+  /// Ensures outgoing audio chunks are little-endian PCM16.
+  /// [data] may be either a [Uint8List] of bytes or a list of 16-bit samples.
+  /// We rewrite each sample into little-endian order before sending it to
+  /// AssemblyAI so that the server can properly decode the audio.
+  Uint8List _toPCM16LE(List<int> data) {
+    final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+    final out = Uint8List(bytes.length);
+    final input = ByteData.sublistView(bytes);
+    final output = ByteData.sublistView(out);
+    for (int i = 0; i < bytes.length ~/ 2; i++) {
+      final sample = input.getInt16(i * 2, Endian.host);
+      output.setInt16(i * 2, sample, Endian.little);
+    }
+    return out;
+  }
+
   // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
   Future<void> _initAssemblyConnection() async {
     try {
@@ -371,8 +387,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             } else {
               final start = _parseTime(data['audio_start']);
               final end = _parseTime(data['audio_end']);
-              unawaited(
-                  _sendTurnChunk(text: text, start: start, end: end, speaker: _myName));
+              unawaited(_sendTurnChunk(
+                  text: text, start: start, end: end, speaker: _myName));
               setState(() {
                 _messages.add({
                   'user': _myName,
@@ -382,8 +398,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 });
                 _latestSentence = '';
               });
-            if (_shouldAutoscroll) _scrollToBottom();
-          }
+              if (_shouldAutoscroll) _scrollToBottom();
+            }
           } else if (msgType == 'turndetected' ||
               msgType == 'turn' ||
               msgType == 'turn_detected') {
@@ -395,12 +411,24 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             print("🔀 Turn detected for $spName: $text [$start-$end]");
             unawaited(
                 _sendTurnChunk(text: text, start: start, end: end, speaker: spName));
+          } else if (msgType == 'sessionbegins' ||
+              msgType == 'session_begins') {
+            print('🚀 Session begins');
+          } else if (msgType == 'sessionended' ||
+              msgType == 'session_ended') {
+            print('🏁 Session ended');
+          } else if (msgType == 'error') {
+            print('⚠️ Error from AssemblyAI: ${data['error'] ?? message}');
           } else {
             print("ℹ️ Other message type: $rawType");
           }
         } catch (e) {
           print("❌ Failed to parse: $e");
         }
+      }, onError: (error) {
+        print('⚠️ WebSocket error: $error');
+      }, onDone: () {
+        print('🔚 WebSocket connection closed');
       });
 
 
@@ -438,8 +466,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
     _audioStreamSub = stream.listen((data) {
       if (_assemblyChannel != null) {
-        final base64Chunk = base64Encode(data);
-        print("🎤 Sending ${data.length} bytes");
+        final pcmBytes = _toPCM16LE(data);
+        final base64Chunk = base64Encode(pcmBytes);
+        final hasAudio = pcmBytes.any((b) => b != 0);
+        print("🎤 Sending ${pcmBytes.length} bytes${hasAudio ? '' : ' (all zeros)'}");
         _assemblyChannel!.sink.add(jsonEncode({
           "audio_data": base64Chunk,
         }));
