@@ -50,6 +50,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     const Color(0xFF4776E6),
     const Color(0xFFFFA726),
   ];
+  final Map<String, String> _speakerNames = {};
+  final Map<String, Color> _speakerColors = {};
 
   String? _currentFilePath;
   final TextEditingController _textController = TextEditingController();
@@ -212,6 +214,44 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
   }
 
+  String _getSpeakerName(String speakerId) {
+    return _speakerNames.putIfAbsent(
+        speakerId, () => 'speaker${_speakerNames.length + 1}');
+  }
+
+  Color _getSpeakerColor(String speakerId) {
+    return _speakerColors.putIfAbsent(speakerId, () {
+      final color = _userColors[_speakerIndex % _userColors.length];
+      _speakerIndex++;
+      return color;
+    });
+  }
+
+  Future<void> _sendTurnChunk({
+    required String text,
+    required int start,
+    required int end,
+    required String speaker,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email') ?? '';
+      final uri = Uri.parse(ApiConstants.streamIdentify);
+      final body = jsonEncode({
+        'email': email,
+        'start': start,
+        'end': end,
+        'speaker': speaker,
+        'text': text,
+      });
+      final res = await http.post(uri,
+          headers: {'Content-Type': 'application/json'}, body: body);
+      print('📡 Sent chunk to stream_identify: ${res.statusCode}');
+    } catch (e) {
+      print('❌ Failed to send chunk: $e');
+    }
+  }
+
   // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
   Future<void> _initAssemblyConnection() async {
     try {
@@ -231,7 +271,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
       print("  Connected to AssemblyAI Universal Streaming. Waiting for messages...");
 
-      _assemblyChannel!.stream.listen((message) {
+      _assemblyChannel!.stream.listen((message) async {
         print("📩 Message received: $message");
         try {
           final data = jsonDecode(message);
@@ -241,16 +281,88 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
             setState(() => _latestSentence = data['text']);
           } else if (data['type'] == 'FinalTranscript') {
             print("✅ Final Transcript: ${data['text']}");
-            setState(() {
-              _messages.add({
-                'user': _myName,
-                'text': data['text'],
-                'time': TimeOfDay.now().format(context),
-                'isMe': true,
+            final words = data['words'] as List? ?? [];
+            if (words.isNotEmpty) {
+              final List<Map<String, dynamic>> segments = [];
+              String? currentSpeaker;
+              int? segStart;
+              int? segEnd;
+              final buffer = StringBuffer();
+              for (final w in words) {
+                final sp = w['speaker']?.toString() ?? 'unknown';
+                final wStart = w['start'] is int
+                    ? w['start'] as int
+                    : int.tryParse(w['start'].toString()) ?? 0;
+                final wEnd = w['end'] is int
+                    ? w['end'] as int
+                    : int.tryParse(w['end'].toString()) ?? 0;
+                final wText = w['text']?.toString() ?? '';
+                if (currentSpeaker == null) {
+                  currentSpeaker = sp;
+                  segStart = wStart;
+                } else if (sp != currentSpeaker) {
+                  segments.add({
+                    'speaker': currentSpeaker,
+                    'start': segStart ?? 0,
+                    'end': segEnd ?? segStart ?? 0,
+                    'text': buffer.toString().trim(),
+                  });
+                  buffer.clear();
+                  currentSpeaker = sp;
+                  segStart = wStart;
+                }
+                segEnd = wEnd;
+                buffer.write('$wText ');
+              }
+              if (currentSpeaker != null) {
+                segments.add({
+                  'speaker': currentSpeaker,
+                  'start': segStart ?? 0,
+                  'end': segEnd ?? segStart ?? 0,
+                  'text': buffer.toString().trim(),
+                });
+              }
+              final newMessages = <Map<String, dynamic>>[];
+              for (final seg in segments) {
+                final spId = seg['speaker'] as String;
+                final spName = _getSpeakerName(spId);
+                final spColor = _getSpeakerColor(spId);
+                final segText = seg['text'] as String;
+                final segStart = seg['start'] as int;
+                final segEnd = seg['end'] as int;
+                print('🗣️ $spName [$segStart-$segEnd]: $segText');
+                unawaited(_sendTurnChunk(
+                    text: segText,
+                    start: segStart,
+                    end: segEnd,
+                    speaker: spName));
+                newMessages.add({
+                  'user': spName,
+                  'text': segText,
+                  'time': TimeOfDay.now().format(context),
+                  'isMe': false,
+                  'color': spColor,
+                });
+              }
+              if (newMessages.isNotEmpty) {
+                setState(() {
+                  _messages.addAll(newMessages);
+                  _latestSentence = '';
+                });
+                if (_shouldAutoscroll) _scrollToBottom();
+              }
+            } else {
+              setState(() {
+                _messages.add({
+                  'user': _myName,
+                  'text': data['text'],
+                  'time': TimeOfDay.now().format(context),
+                  'isMe': true,
+                });
+                _latestSentence = '';
               });
-              _latestSentence = '';
-            });
-            if (_shouldAutoscroll) _scrollToBottom();
+              if (_shouldAutoscroll) _scrollToBottom();
+            }
           } else {
             print("ℹ️ Other message type: ${data['type']}");
           }
@@ -1010,7 +1122,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                           final spoken = msg['spoken'] ?? false;
                           final color = isMe
                               ? (widget.isDarkMode ? Colors.blue : Colors.deepPurpleAccent)
-                              : _userColors[index % _userColors.length];
+                              : (msg['color'] ?? _userColors[index % _userColors.length]);
                           return Align(
                             alignment: isMe
                                 ? Alignment.centerRight
