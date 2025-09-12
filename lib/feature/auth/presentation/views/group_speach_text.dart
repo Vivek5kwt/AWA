@@ -15,7 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/io.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
@@ -39,7 +39,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _amplitudeTimer;
   late AnimationController _micGlowController;
   final AudioRecorder _recorder = AudioRecorder();
-  WebSocketChannel? _assemblyChannel;
+  IOWebSocketChannel? _assemblyChannel;
   StreamSubscription<Uint8List>? _audioStreamSub;
 
   final List<Map<String, dynamic>> _messages = [];
@@ -212,44 +212,57 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
   }
 
+  // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
   Future<void> _initAssemblyConnection() async {
-    _assemblyChannel = WebSocketChannel.connect(
-      Uri.parse('wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000'),
-    );
+    try {
+      final url =
+          'wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&encoding=pcm_s16le&format_turns=true';
 
-    _assemblyChannel!.sink.add(jsonEncode({
-      'auth': 'YOUR_ASSEMBLY_AI_API_KEY',
-    }));
+      print("🔌 Connecting to: $url");
 
-    _assemblyChannel!.stream.listen((message) {
-      final data = jsonDecode(message);
-      final text = data['text'] as String? ?? '';
-      if (text.isEmpty) return;
+      _assemblyChannel = IOWebSocketChannel.connect(
+        Uri.parse(url),
+        headers: {
+          // For production you should use an ephemeral token instead of your permanent key.
+          'Authorization': '2e2658a6407841d195ab268060d19b7e',
+        },
+        pingInterval: const Duration(seconds: 15),
+      );
 
-      if (data['message_type'] == 'partial_transcript') {
-        setState(() {
-          _latestSentence = text;
-        });
-      } else if (data['message_type'] == 'final_transcript') {
-        setState(() {
-          _latestSentence = text;
-          _messages.add({
-            'user': _myName,
-            'text': text,
-            'time': TimeOfDay.now().format(context),
-            'isMe': true,
-            'spoken': false,
-          });
-        });
-        if (_shouldAutoscroll) _scrollToBottom();
-        _latestSentenceTimer?.cancel();
-        _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-          setState(() {
-            _latestSentence = '';
-          });
-        });
-      }
-    });
+      print("  Connected to AssemblyAI Universal Streaming. Waiting for messages...");
+
+      _assemblyChannel!.stream.listen((message) {
+        print("📩 Message received: $message");
+        try {
+          final data = jsonDecode(message);
+
+          if (data['type'] == 'PartialTranscript') {
+            print("✍️ Partial Transcript: ${data['text']}");
+            setState(() => _latestSentence = data['text']);
+          } else if (data['type'] == 'FinalTranscript') {
+            print("✅ Final Transcript: ${data['text']}");
+            setState(() {
+              _messages.add({
+                'user': _myName,
+                'text': data['text'],
+                'time': TimeOfDay.now().format(context),
+                'isMe': true,
+              });
+              _latestSentence = '';
+            });
+            if (_shouldAutoscroll) _scrollToBottom();
+          } else {
+            print("ℹ️ Other message type: ${data['type']}");
+          }
+        } catch (e) {
+          print("❌ Failed to parse: $e");
+        }
+      });
+
+
+    } catch (e, st) {
+      print("❌ Connection failed: $e\n$st");
+    }
   }
 
   Future<void> _startListening() async {
@@ -280,11 +293,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     );
 
     _audioStreamSub = stream.listen((data) {
-      final base64Chunk = base64Encode(data);
-      _assemblyChannel?.sink.add(jsonEncode({
-        "audio_data": base64Chunk,
-      }));
+      if (_assemblyChannel != null) {
+        final base64Chunk = base64Encode(data);
+        print("🎤 Sending ${data.length} bytes");
+        _assemblyChannel!.sink.add(jsonEncode({
+          "audio_data": base64Chunk,
+        }));
+      }
     });
+
   }
 
   Future<void> _continueRecordingCycle() async {
@@ -359,6 +376,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     await _recorder.stop();
     _assemblyChannel?.sink.close();
   }
+
   Future<int> _getWavDurationSeconds(File file) async {
     try {
       final bytes = await file.readAsBytes();
@@ -370,7 +388,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return 0;
   }
 
-
   // Allow English and major Indian scripts so that Hindi or other
   // Indian languages are not filtered out when app language is English.
   bool _isTextInLanguage(String text, String languageCode) {
@@ -380,8 +397,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       final hasIndianChars = RegExp(
           r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF'
           r'\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF'
-          r'\u0D00-\u0D7F\u0D80-\u0DFF]'
-      ).hasMatch(text);
+          r'\u0D00-\u0D7F\u0D80-\u0DFF]')
+          .hasMatch(text);
       if (englishLetters.length > text.length * 0.6 || hasIndianChars) {
         return true;
       }
@@ -1364,7 +1381,6 @@ class _AudioQueueItem {
   final int label;
   _AudioQueueItem({required this.file, required this.label});
 }
-
 
 class MeetingHistoryScreen extends StatelessWidget {
   final bool isDark;
