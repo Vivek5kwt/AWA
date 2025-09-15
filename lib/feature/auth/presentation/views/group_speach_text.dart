@@ -40,7 +40,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   bool _manualStop = false;
   late AnimationController _micGlowController;
   final AudioRecorder _recorder = AudioRecorder();
-  IOWebSocketChannel? _assemblyChannel;
+  IOWebSocketChannel? _openAiChannel;
   StreamSubscription<Uint8List>? _audioStreamSub;
   final List<int> _pcmBuffer = [];
   Timer? _keepAliveTimer;
@@ -48,8 +48,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   String? _sessionLanguage;
   String _transcribedText = "";  // Final transcript text
   String _partialText = "";      // Temporary partial transcript
-  // AssemblyAI API key used for Authorization header when connecting over WebSocket.
-  static const String _assemblyApiKey = '2e2658a6407841d195ab268060d19b7e';
 
   final List<Map<String, dynamic>> _messages = [];
   int _speakerIndex = 0;
@@ -155,7 +153,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _silenceTimer?.cancel();
     _audioStreamSub?.cancel();
     _keepAliveTimer?.cancel();
-    _assemblyChannel?.sink.close();
+    _openAiChannel?.sink.close();
     _recorder.dispose();
     _micGlowController.dispose();
     _textController.dispose();
@@ -262,59 +260,93 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     }
   }
 
-  // 🔧 FIXED: use /v3/ws (not just /v3). Kept sample_rate & encoding. Added format_turns and a keep-alive ping.
+  // 🔧 Attempt to reconnect if the socket closes unexpectedly.
   void _scheduleReconnect() {
     print("🔄 Reconnecting in 3 seconds...");
     Future.delayed(const Duration(seconds: 3), () {
-      _initAssemblyConnection(); // फिर से connect करने की कोशिश
+      _initOpenAIConnection(); // reconnect attempt
     });
   }
 
-  /// 1) Connect to AssemblyAI websocket
-  Future<void> _initAssemblyConnection() async {
+  /// 1) Fetch ephemeral key and connect to OpenAI Realtime websocket
+  Future<void> _initOpenAIConnection() async {
     try {
-      // WebSocket URL with required params
-      final url =
-          'wss://streaming.assemblyai.com/v3/realtime'
-          '?sample_rate=16000'
-          '&encoding=pcm_s16le'
-          '&format_turns=true'
-          '&language_code=en';
+      final keyResp = await http
+          .get(Uri.parse('${ApiConstants.baseUrl}/get-ephemeral-key'));
+      if (keyResp.statusCode != 200) {
+        throw Exception('Failed to fetch ephemeral key');
+      }
+      final ephKey = jsonDecode(keyResp.body)['key'];
 
+      const url =
+          'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
       print("🔌 Connecting to: $url");
 
-      // Connect to AssemblyAI WebSocket
-      _assemblyChannel = IOWebSocketChannel.connect(
+      _openAiChannel = IOWebSocketChannel.connect(
         Uri.parse(url),
         headers: {
-          'Authorization': _assemblyApiKey, // your AssemblyAI API key
+          'Authorization': 'Bearer $ephKey',
+          'OpenAI-Beta': 'realtime=v1',
         },
         pingInterval: const Duration(seconds: 15),
       );
 
-      print("✅ Connected to AssemblyAI. Waiting for messages...");
+      print("✅ Connected to OpenAI Realtime. Waiting for messages...");
 
-      // Listen for messages
-      _assemblyChannel!.stream.listen(
-            (event) {
+      _openAiChannel!.stream.listen(
+        (event) {
           print("📩 Message: $event");
-
           try {
             final data = jsonDecode(event);
             if (data is Map<String, dynamic>) {
-              final text = data['text'];
-              final messageType = data['type'];
-
-              if (messageType == 'FinalTranscript' && text != null) {
-                print("📝 Final: $text");
-                setState(() {
-                  _transcribedText += "\n$text";
-                });
-              } else if (messageType == 'PartialTranscript' && text != null) {
-                print("⌨️ Partial: $text");
-                setState(() {
-                  _partialText = text;
-                });
+              final type = data['type'];
+              if (type == 'response.delta') {
+                final delta = data['delta'];
+                String text = '';
+                if (delta is Map && delta['content'] is List) {
+                  for (var c in delta['content']) {
+                    if (c is Map && c['text'] is String) {
+                      text += c['text'];
+                    }
+                  }
+                }
+                if (text.isNotEmpty) {
+                  setState(() {
+                    _partialText = text;
+                    if (_messages.isEmpty || _messages.last['isFinal'] == true) {
+                      _messages.add({
+                        'user': _myName,
+                        'text': text,
+                        'time': TimeOfDay.now().format(context),
+                        'isMe': true,
+                        'spoken': false,
+                        'audioLabel': null,
+                        'isFinal': false,
+                      });
+                    } else {
+                      _messages.last['text'] = text;
+                    }
+                  });
+                }
+              } else if (type == 'response.completed') {
+                final resp = data['response'];
+                String text = '';
+                if (resp is Map && resp['content'] is List) {
+                  for (var c in resp['content']) {
+                    if (c is Map && c['text'] is String) {
+                      text += c['text'];
+                    }
+                  }
+                }
+                if (text.isNotEmpty) {
+                  setState(() {
+                    _transcribedText += "\n$text";
+                    if (_messages.isNotEmpty) {
+                      _messages.last['text'] = text;
+                      _messages.last['isFinal'] = true;
+                    }
+                  });
+                }
               }
             }
           } catch (e) {
@@ -330,6 +362,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         },
         cancelOnError: true,
       );
+
+      // Initiate response stream for transcription
+      _openAiChannel!.sink.add(jsonEncode({"type": "response.create"}));
     } catch (e) {
       print("❌ Failed to connect WebSocket: $e");
       _scheduleReconnect();
@@ -343,7 +378,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
     _manualStop = false;
     _reconnectAttempts = 0;
-    await _initAssemblyConnection();
+    await _initOpenAIConnection();
 
     setState(() {
       _isRecording = true;
@@ -373,7 +408,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
     const frameBytes = 3200; // 100ms of PCM16 @16kHz
     _audioStreamSub = stream.listen((data) {
-      if (_assemblyChannel == null) return;
+      if (_openAiChannel == null) return;
       final bytes = data is Uint8List ? data : Uint8List.fromList(data);
       _pcmBuffer.addAll(bytes);
 
@@ -399,8 +434,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
         print("🎤 Sending ${chunk.length} bytes | $firstBytes");
         final base64Chunk = base64Encode(chunk);
-        _assemblyChannel!.sink.add(jsonEncode({
-          "audio_data": base64Chunk,
+        _openAiChannel!.sink.add(jsonEncode({
+          "type": "input_audio_buffer.append",
+          "audio": base64Chunk,
         }));
       }
     });
@@ -419,10 +455,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     await _recorder.stop();
     _keepAliveTimer?.cancel();
 
-    if (_assemblyChannel != null) {
-      // give AssemblyAI 1s to flush final transcript
+    if (_openAiChannel != null) {
+      _openAiChannel!.sink.add(jsonEncode({"type": "input_audio_buffer.commit"}));
       await Future.delayed(const Duration(seconds: 1));
-      await _assemblyChannel!.sink.close();
+      await _openAiChannel!.sink.close();
     }
 
     print("🏁 Recording stopped + WebSocket closed.");
