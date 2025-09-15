@@ -262,10 +262,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   // 🔧 Attempt to reconnect if the socket closes unexpectedly.
   void _scheduleReconnect() {
-    print("🔄 Reconnecting in 3 seconds...");
+/*    print("🔄 Reconnecting in 3 seconds...");
     Future.delayed(const Duration(seconds: 3), () {
-      _initOpenAIConnection(); // reconnect attempt
-    });
+     // reconnect attempt
+    });*/
+    _initOpenAIConnection();
   }
 
   /// 1) Fetch ephemeral key and connect to OpenAI Realtime websocket
@@ -276,15 +277,20 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       if (keyResp.statusCode != 200) {
         throw Exception('Failed to fetch ephemeral key');
       }
-      final ephKey = jsonDecode(keyResp.body)['key'];
+
+      // ✅ Extract client_secret.value instead of "id"
+      final body = jsonDecode(keyResp.body);
+      final ephKey = body['client_secret']?['value'];
 
       const url =
           'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
       print("🔌 Connecting to: $url");
+      print("🔑 Ephemeral key: $ephKey");
 
       _openAiChannel = IOWebSocketChannel.connect(
         Uri.parse(url),
         headers: {
+          // ✅ Use the dynamic ephKey value in the Authorization header
           'Authorization': 'Bearer $ephKey',
           'OpenAI-Beta': 'realtime=v1',
         },
@@ -294,7 +300,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       print("✅ Connected to OpenAI Realtime. Waiting for messages...");
 
       _openAiChannel!.stream.listen(
-        (event) {
+            (event) {
           print("📩 Message: $event");
           try {
             final data = jsonDecode(event);
