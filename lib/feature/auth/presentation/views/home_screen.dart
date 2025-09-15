@@ -534,6 +534,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _deleteAccount() async => _showDeleteDialog();
 
+  Future<void> _navigateToLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (!mounted) return;
+    context.go('/login');
+  }
+
   Future<void> _showLogoutDialog() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1972,21 +1979,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                     const SizedBox(height: 15),
                     Divider(color: _isDarkMode ? Colors.white24 : Colors.black26),
-                    ListTile(
-                      leading: Icon(Icons.exit_to_app,
-                          color: _isDarkMode ? Colors.white : Colors.black),
-                      title: Text(context.loc.logout,
-                          style: TextStyle(
-                              color: _isDarkMode ? Colors.white : Colors.black)),
-                      onTap: _logout,
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.delete_forever,
-                          color: Colors.redAccent),
-                      title: Text(context.loc.deleteAccount,
-                          style: const TextStyle(color: Colors.redAccent)),
-                      onTap: _deleteAccount,
-                    ),
+                    if (_loginType == 'guest')
+                      ListTile(
+                        leading: Icon(Icons.login,
+                            color: _isDarkMode ? Colors.white : Colors.black),
+                        title: Text(context.loc.login,
+                            style: TextStyle(
+                                color:
+                                    _isDarkMode ? Colors.white : Colors.black)),
+                        onTap: _navigateToLogin,
+                      )
+                    else ...[
+                      ListTile(
+                        leading: Icon(Icons.exit_to_app,
+                            color: _isDarkMode ? Colors.white : Colors.black),
+                        title: Text(context.loc.logout,
+                            style: TextStyle(
+                                color:
+                                    _isDarkMode ? Colors.white : Colors.black)),
+                        onTap: _logout,
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.delete_forever,
+                            color: Colors.redAccent),
+                        title: Text(context.loc.deleteAccount,
+                            style: const TextStyle(color: Colors.redAccent)),
+                        onTap: _deleteAccount,
+                      ),
+                    ],
                     const SizedBox(height: 10),
                   ],
                 ),
