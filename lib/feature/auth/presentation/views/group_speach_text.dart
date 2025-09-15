@@ -4,12 +4,13 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui';
+
 import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:flutter/material.dart';
 import 'package:wave_blob/wave_blob.dart';
+
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -39,29 +40,19 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Timer? _amplitudeTimer;
   bool _manualStop = false;
   late AnimationController _micGlowController;
+
   final AudioRecorder _recorder = AudioRecorder();
   IOWebSocketChannel? _openAiChannel;
   StreamSubscription<Uint8List>? _audioStreamSub;
   final List<int> _pcmBuffer = [];
-  Timer? _keepAliveTimer;
-  Timer? _ephemeralKeyTimer;
+
   int _reconnectAttempts = 0;
-  String? _sessionLanguage;
+
   String _transcribedText = "";  // Final transcript text
-  String _partialText = "";      // Temporary partial transcript
+  String _partialText = "";      // Streaming partial transcript
 
   final List<Map<String, dynamic>> _messages = [];
-  int _speakerIndex = 0;
-  final List<Color> _userColors = [
-    const Color(0xFF50E3C2),
-    const Color(0xFF8E54E9),
-    const Color(0xFF4776E6),
-    const Color(0xFFFFA726),
-  ];
-  final Map<String, String> _speakerNames = {};
-  final Map<String, Color> _speakerColors = {};
 
-  String? _currentFilePath;
   final TextEditingController _textController = TextEditingController();
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
@@ -70,12 +61,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
   String _appLanguageCode = 'en';
 
-  bool _speakOnMeeting = true;
+  bool _speakOnMeeting = false; // off by default — only show text
   bool _showTextMyLanguage = false;
-
-  final List<_AudioQueueItem> _audioQueue = [];
-  bool _isApiProcessing = false;
-  int _audioLabel = 0;
 
   late final ScrollController _scrollController;
   bool _showScrollDownBtn = false;
@@ -99,11 +86,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       lowerBound: 0.97,
       upperBound: 1.13,
     )..repeat(reverse: true);
+
     _initUser();
     _initTTS();
     _loadSpeakOnMeeting();
     _loadShowTextMyLanguage();
     _loadAppLanguageCode();
+
     _scrollController = ScrollController();
     _scrollController.addListener(_handleScroll);
 
@@ -153,8 +142,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _latestSentenceTimer?.cancel();
     _silenceTimer?.cancel();
     _audioStreamSub?.cancel();
-    _keepAliveTimer?.cancel();
-    _ephemeralKeyTimer?.cancel();
     _openAiChannel?.sink.close();
     _recorder.dispose();
     _micGlowController.dispose();
@@ -167,7 +154,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   Future<void> _loadSpeakOnMeeting() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _speakOnMeeting = prefs.getBool('speakOnMeeting') ?? true;
+      _speakOnMeeting = prefs.getBool('speakOnMeeting') ?? false;
     });
   }
 
@@ -219,178 +206,123 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     return s[0].toUpperCase() + s.substring(1);
   }
 
-  String _generateTempFilePath() {
-    final tempDir = Directory.systemTemp;
-    return '${tempDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
-  }
-
-  String _getSpeakerName(String speakerId) {
-    return _speakerNames.putIfAbsent(
-        speakerId, () => 'Speaker${_speakerNames.length + 1}');
-  }
-
-  Color _getSpeakerColor(String speakerId) {
-    return _speakerColors.putIfAbsent(speakerId, () {
-      final color = _userColors[_speakerIndex % _userColors.length];
-      _speakerIndex++;
-      return color;
-    });
-  }
-
-  Future<void> _sendTurnChunk({
-    required String text,
-    required int start,
-    required int end,
-    String speaker = 'unknown',
-  }) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final email = prefs.getString('email') ?? '';
-      final uri = Uri.parse(ApiConstants.streamIdentify);
-      final body = jsonEncode({
-        'email': email,
-        'start': start,
-        'end': end,
-        'speaker': speaker,
-        'text': text,
-      });
-      final res = await http.post(uri,
-          headers: {'Content-Type': 'application/json'}, body: body);
-      print('📡 Sent chunk to stream_identify: ${res.statusCode}');
-    } catch (e) {
-      print('❌ Failed to send chunk: $e');
-    }
-  }
-
   // 🔧 Attempt to reconnect if the socket closes unexpectedly.
   void _scheduleReconnect() {
-/*    print("🔄 Reconnecting in 3 seconds...");
-    Future.delayed(const Duration(seconds: 3), () {
-     // reconnect attempt
-    });*/
     _initOpenAIConnection();
   }
 
   /// 1) Fetch ephemeral key and connect to OpenAI Realtime websocket
   Future<void> _initOpenAIConnection() async {
     try {
-      await _openAiChannel?.sink.close();
-      final keyResp = await http
-          .get(Uri.parse('${ApiConstants.baseUrl}/get-ephemeral-key'));
+      final keyResp = await http.get(Uri.parse('${ApiConstants.baseUrl}/get-ephemeral-key'));
       if (keyResp.statusCode != 200) {
         throw Exception('Failed to fetch ephemeral key');
       }
 
-      // ✅ Extract client_secret.value instead of "id"
       final body = jsonDecode(keyResp.body);
       final ephKey = body['client_secret']?['value'];
-      final expiresAt = body['client_secret']?['expires_at'];
 
-      if (expiresAt != null) {
-        final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-        final refreshIn = expiresAt - nowSec - 5;
-        if (refreshIn > 0) {
-          _ephemeralKeyTimer?.cancel();
-          _ephemeralKeyTimer =
-              Timer(Duration(seconds: refreshIn), _initOpenAIConnection);
-        }
-      }
-
-      const url =
-          'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
-      print("🔌 Connecting to: $url");
-      print("🔑 Ephemeral key: $ephKey");
+      // ✅ PURE TRANSCRIPTION MODEL
+      const url = 'https://api.openai.com/v1/audio/transcriptions';
 
       _openAiChannel = IOWebSocketChannel.connect(
         Uri.parse(url),
         headers: {
-          // ✅ Use the dynamic ephKey value in the Authorization header
           'Authorization': 'Bearer $ephKey',
           'OpenAI-Beta': 'realtime=v1',
         },
         pingInterval: const Duration(seconds: 15),
       );
 
-      print("✅ Connected to OpenAI Realtime. Waiting for messages...");
+      // 🚫 Tell the session to TRANSCRIBE ONLY (no answers, no tools)
+      _openAiChannel!.sink.add(jsonEncode({
+        "type": "session.update",
+        "session": {
+          "instructions": "TRANSCRIBE ONLY. Do not respond, translate, summarize, or answer. Emit audio_transcript.* events only.",
+          "tools": [],
+          "modalities": ["text"],
+          "input_audio_format": {"type": "pcm16", "sample_rate": 16000, "channels": 1},
+          "turn_detection": {"type": "server_vad"}
+        }
+      }));
 
-      _openAiChannel!.stream.listen(
-            (event) {
-          print("📩 Message: $event");
-          try {
-            final data = jsonDecode(event);
-            if (data is Map<String, dynamic>) {
-              final type = data['type'];
-              if (type == 'response.delta') {
-                final delta = data['delta'];
-                String text = '';
-                if (delta is Map && delta['content'] is List) {
-                  for (var c in delta['content']) {
-                    if (c is Map && c['text'] is String) {
-                      text += c['text'];
-                    }
-                  }
-                }
-                if (text.isNotEmpty) {
-                  setState(() {
-                    _partialText = text;
-                    if (_messages.isEmpty || _messages.last['isFinal'] == true) {
-                      _messages.add({
-                        'user': _myName,
-                        'text': text,
-                        'time': TimeOfDay.now().format(context),
-                        'isMe': true,
-                        'spoken': false,
-                        'audioLabel': null,
-                        'isFinal': false,
-                      });
-                    } else {
-                      _messages.last['text'] = text;
-                    }
-                  });
-                }
-              } else if (type == 'response.completed') {
-                final resp = data['response'];
-                String text = '';
-                if (resp is Map && resp['content'] is List) {
-                  for (var c in resp['content']) {
-                    if (c is Map && c['text'] is String) {
-                      text += c['text'];
-                    }
-                  }
-                }
-                if (text.isNotEmpty) {
-                  setState(() {
-                    _transcribedText += "\n$text";
-                    if (_messages.isNotEmpty) {
-                      _messages.last['text'] = text;
-                      _messages.last['isFinal'] = true;
-                    }
-                  });
-                }
-              }
-            }
-          } catch (e) {
-            print("⚠️ Error parsing message: $e");
+      _openAiChannel!.stream.listen((event) {
+        try {
+          final data = jsonDecode(event);
+          if (data is! Map<String, dynamic>) return;
+          final String? type = data['type'];
+
+          // 🛡 Hard-ignore ANY assistant output just in case
+          if (type == 'response.created' ||
+              type == 'response.output_text.delta' ||
+              type == 'response.output_text.done' ||
+              type == 'response.done' ||
+              type == 'response.completed' ||
+              type == 'response.refusal.delta' ||
+              type == 'response.refusal.done' ||
+              type == 'conversation.item.created') {
+            // Do nothing: we don't show assistant messages
+            return;
           }
-        },
-        onDone: () {
-          print("🔚 WebSocket connection closed");
-        },
-        onError: (error) {
-          print("! WebSocket error: $error");
-          _scheduleReconnect();
-        },
-        cancelOnError: true,
-      );
 
-      // Initiate response stream for transcription
-      _openAiChannel!.sink.add(jsonEncode({"type": "response.create"}));
+          // 🎧 Live transcript stream
+          if (type == 'response.audio_transcript.delta') {
+            final delta = data['delta'] ?? '';
+            if (delta is String && delta.isNotEmpty) {
+              setState(() {
+                _partialText += delta;
+                if (_messages.isEmpty || (_messages.last['isFinal'] == true)) {
+                  _messages.add({
+                    'user': _myName,
+                    'text': _partialText,
+                    'time': TimeOfDay.now().format(context),
+                    'isMe': true,
+                    'spoken': false,
+                    'audioLabel': null,
+                    'isFinal': false,
+                  });
+                } else {
+                  _messages.last['text'] = _partialText;
+                }
+              });
+            }
+            return;
+          }
+
+          // ✅ Finalize the current utterance
+          if (type == 'response.audio_transcript.completed') {
+            setState(() {
+              if (_messages.isNotEmpty) {
+                _messages.last['isFinal'] = true;
+              }
+              _transcribedText += (_partialText.isEmpty ? "" : "\n$_partialText");
+              _latestSentence = _partialText.trim();
+              _partialText = "";
+            });
+
+            _latestSentenceTimer?.cancel();
+            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+              if (!mounted) return;
+              setState(() => _latestSentence = '');
+            });
+
+            _saveCurrentMeetingToFirestore();
+            if (_shouldAutoscroll) _scrollToBottom(animate: true);
+            return;
+          }
+
+        } catch (e) {
+          // ignore parse errors
+        }
+      });
+
+      // ❌ DO NOT create responses; we only want transcripts
+      // _openAiChannel!.sink.add(jsonEncode({"type": "response.create"}));
+
     } catch (e) {
-      print("❌ Failed to connect WebSocket: $e");
       _scheduleReconnect();
     }
   }
-
 
   /// 2) Start recording + streaming PCM16 @ 16kHz
   Future<void> _startListening() async {
@@ -402,7 +334,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
 
     setState(() {
       _isRecording = true;
-      _speakerIndex = 0;
     });
     _resetSilenceTimer();
 
@@ -423,7 +354,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         audioSource: AndroidAudioSource.voiceRecognition,
       ),
     );
-    print('🎙️ Recorder config: 16kHz mono PCM16 (voiceRecognition source)');
+
     final stream = await _recorder.startStream(config);
 
     const frameBytes = 3200; // 100ms of PCM16 @16kHz
@@ -436,23 +367,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         final chunk = Uint8List.fromList(_pcmBuffer.sublist(0, frameBytes));
         _pcmBuffer.removeRange(0, frameBytes);
 
-        final bd = ByteData.sublistView(chunk);
-        double sum = 0;
-        for (int i = 0; i < frameBytes; i += 2) {
-          sum += bd.getInt16(i, Endian.little).abs();
-        }
-        final avgAmp = sum / (frameBytes ~/ 2);
-        final firstBytes = chunk
-            .take(8)
-            .map((b) => b.toRadixString(16).padLeft(2, '0'))
-            .join(' ');
-        print('Avg amplitude: ${avgAmp.toStringAsFixed(2)}');
-        if (chunk.every((b) => b == 0)) {
-          print("⚠️ Skipping silent chunk | $firstBytes");
-          continue;
-        }
+        // Drop totally silent chunks (optional)
+        if (chunk.every((b) => b == 0)) continue;
 
-        print("🎤 Sending ${chunk.length} bytes | $firstBytes");
         final base64Chunk = base64Encode(chunk);
         _openAiChannel!.sink.add(jsonEncode({
           "type": "input_audio_buffer.append",
@@ -473,94 +390,16 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _amplitudeTimer?.cancel();
     await _audioStreamSub?.cancel();
     await _recorder.stop();
-    _keepAliveTimer?.cancel();
 
     if (_openAiChannel != null) {
+      // Finalize the current buffer; session will finish any last transcript
       _openAiChannel!.sink.add(jsonEncode({"type": "input_audio_buffer.commit"}));
-      await Future.delayed(const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 600));
       await _openAiChannel!.sink.close();
-    }
-
-    print("🏁 Recording stopped + WebSocket closed.");
-  }
-
-  Future<void> _continueRecordingCycle() async {
-    while (_isRecording) {
-      await Future.delayed(const Duration(seconds: 5));
-      if (!_isRecording) break;
-
-      final String? stoppedPath = await _recorder.stop();
-      if (stoppedPath != null) {
-        final File audioFile = File(stoppedPath);
-        final label = _audioLabel++;
-        bool shouldSend = await _isAudioSignificant(audioFile);
-        if (shouldSend) {
-          _resetSilenceTimer();
-          _audioQueue.add(_AudioQueueItem(file: audioFile, label: label));
-          _processAudioQueue();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text("No voice detected, try again!"),
-              backgroundColor: Colors.orange.shade400,
-              duration: const Duration(milliseconds: 900),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-
-      if (!_isRecording) break;
-
-      _currentFilePath = _generateTempFilePath();
-      await _recorder.start(
-        RecordConfig(
-          encoder: AudioEncoder.wav,
-          bitRate: 256000,
-          sampleRate: 44100,
-          numChannels: 1,
-        ),
-        path: _currentFilePath!,
-      );
+      _openAiChannel = null;
     }
   }
 
-  Future<bool> _isAudioSignificant(File file) async {
-    try {
-      if (!(await file.exists())) return false;
-      final bytes = await file.readAsBytes();
-      if (bytes.length < 6000) return false;
-      if (bytes.length > 44) {
-        Uint8List pcm = bytes.sublist(44);
-        int silentCount = 0;
-        for (int i = 0; i < pcm.length; i += 2) {
-          int val = pcm[i] | (pcm[i + 1] << 8);
-          if (val.abs() < 300) silentCount++;
-        }
-        if (silentCount > (pcm.length ~/ 2 * 0.90)) return false;
-      }
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-
-
-
-  Future<int> _getWavDurationSeconds(File file) async {
-    try {
-      final bytes = await file.readAsBytes();
-      if (bytes.length < 44) return 0;
-      final byteRate = bytes.buffer.asByteData().getUint32(28, Endian.little);
-      final dataLen = bytes.length - 44;
-      if (byteRate > 0) return (dataLen ~/ byteRate).clamp(0, 1000);
-    } catch (_) {}
-    return 0;
-  }
-
-  // Allow English and major Indian scripts so that Hindi or other
-  // Indian languages are not filtered out when app language is English.
   bool _isTextInLanguage(String text, String languageCode) {
     if (languageCode == 'en') {
       final englishLetters =
@@ -590,7 +429,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       builder: (ctx) => AlertDialog(
         title: const Text('No voice detected'),
         content: const Text(
-            'No voice detected for a while. Stop the conversation? You can start again when your meeting begins. Your meeting is saved.'),
+            'No voice detected for a while. Stop listening? You can start again anytime. Your meeting is saved.'),
         actions: [
           TextButton(
             onPressed: () {
@@ -623,238 +462,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     });
   }
 
-  void _processAudioQueue() async {
-    if (_isApiProcessing || _audioQueue.isEmpty) return;
-    _isApiProcessing = true;
-    while (_audioQueue.isNotEmpty) {
-      final item = _audioQueue.removeAt(0);
-      await _hitIdentifySpeaker(item.file, item.label);
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
-    _isApiProcessing = false;
-  }
-
-  Future<void> _hitIdentifySpeaker(File audioFile, int label) async {
-    final prefs = await SharedPreferences.getInstance();
-    final storedEmail = prefs.getString('email') ?? '';
-
-    final base = _showTextMyLanguage
-        ? ApiConstants.identifySpeakerNative
-        : ApiConstants.identifySpeaker;
-    Uri uri = Uri.parse('$base?email=$storedEmail&label=$label');
-    void showAccountDeletedDialog() {
-      showGeneralDialog(
-        context: context,
-        barrierDismissible: false,
-        barrierLabel: "accountDeleted",
-        pageBuilder: (ctx, _, __) => WillPopScope(
-          onWillPop: () async => false,
-          child: Container(
-            color: widget.isDarkMode ? Color(0xFF181A20) : Color(0xFFFCF6BA),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                child: Material(
-                  borderRadius: BorderRadius.circular(26),
-                  color: widget.isDarkMode
-                      ? Colors.blueGrey[900]!.withOpacity(0.98)
-                      : Colors.white.withOpacity(0.97),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(30),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.block_rounded,
-                          color: widget.isDarkMode
-                              ? Colors.cyanAccent
-                              : Colors.deepPurpleAccent,
-                          size: 55,
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          "Your account has been blocked",
-                          style: TextStyle(
-                            color: widget.isDarkMode
-                                ? Colors.cyanAccent
-                                : Colors.deepPurpleAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 22,
-                            letterSpacing: 1.1,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          "For security reasons, your account was blocked by admin. Please contact our support team for assistance.",
-                          style: TextStyle(
-                            color: widget.isDarkMode
-                                ? Colors.white70
-                                : Colors.blueGrey.shade700,
-                            fontSize: 16,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 26),
-                        ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: widget.isDarkMode
-                                ? Colors.cyanAccent.withOpacity(0.85)
-                                : Colors.deepPurpleAccent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 38, vertical: 14),
-                          ),
-                          icon: Icon(
-                            Icons.support_agent_rounded,
-                            color: widget.isDarkMode ? Colors.black : Colors.white,
-                            size: 26,
-                          ),
-                          label: Text(
-                            "Contact Support",
-                            style: TextStyle(
-                                color: widget.isDarkMode
-                                    ? Colors.black
-                                    : Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 17.3),
-                          ),
-                          onPressed: () {
-                            context.go(Routes.login);
-                          },
-                        ),
-                        const SizedBox(height: 15),
-                        TextButton(
-                            onPressed: () {
-                              context.go(Routes.login);
-                            },
-                            child: Text(
-                              "Exit App",
-                              style: TextStyle(
-                                  color: widget.isDarkMode
-                                      ? Colors.cyanAccent
-                                      : Colors.deepPurpleAccent,
-                                  fontSize: 15.5,
-                                  fontWeight: FontWeight.bold),
-                            )
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    Future<http.StreamedResponse> sendRequest(Uri targetUri) {
-      final request = http.MultipartRequest('POST', targetUri)
-        ..files.add(
-          http.MultipartFile.fromBytes(
-            'audio_file',
-            audioFile.readAsBytesSync(),
-            filename: audioFile.path.split('/').last,
-            contentType: MediaType('audio', 'wav'),
-          ),
-        );
-      return request.send();
-    }
-
-    try {
-      http.StreamedResponse streamed = await sendRequest(uri);
-      http.Response response = await http.Response.fromStream(streamed);
-
-      if (response.statusCode == 307 || response.statusCode == 302) {
-        final location = streamed.headers['location'];
-        if (location != null) {
-          uri = Uri.parse(location);
-          streamed = await sendRequest(uri);
-          response = await http.Response.fromStream(streamed);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Redirect without Location header'),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
-          return;
-        }
-      }
-      if (response.statusCode == 204) {
-        await Future.delayed(const Duration(milliseconds: 600));
-        if (mounted) showAccountDeletedDialog();
-        setState(() {
-        });
-        return;
-      }
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        final speakers = body['speakers'] as List<dynamic>;
-
-        setState(() {
-          for (var speakerEntry in speakers) {
-            final key = (speakerEntry as Map<String, dynamic>).keys.first;
-            final data = speakerEntry[key] as Map<String, dynamic>;
-            final name = data['name'] as String? ?? 'Unknown';
-            final text = data['spoken_text'] as String? ?? '';
-            final time = TimeOfDay.now().format(context);
-
-            if (text.trim().isEmpty) {
-              continue;
-            }
-            if (!_showTextMyLanguage &&
-                !_isTextInLanguage(text, _appLanguageCode)) {
-              continue;
-            }
-
-            _messages.add({
-              'user': name,
-              'text': text,
-              'time': time,
-              'isMe': false,
-              'spoken': false,
-              'audioLabel': label,
-            });
-            _latestSentence = text;
-            _latestSentenceTimer?.cancel();
-            _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-              setState(() {
-                _latestSentence = '';
-              });
-            });
-            _speakerIndex++;
-          }
-        });
-
-        await _saveCurrentMeetingToFirestore();
-        if (_shouldAutoscroll) _scrollToBottom(animate: true);
-      } else {
-        final errorBody = response.body.isNotEmpty
-            ? response.body
-            : 'No error message from API';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('API error ${response.statusCode}: $errorBody'),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to call API: $e'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
   Future<void> _sendTextMessage() async {
     final msg = _textController.text.trim();
     if (msg.isEmpty) return;
@@ -871,40 +478,21 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       _latestSentence = msg;
       _latestSentenceTimer?.cancel();
       _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-        setState(() {
-          _latestSentence = '';
-        });
+        setState(() => _latestSentence = '');
       });
     });
 
     await _saveCurrentMeetingToFirestore();
-    await Future.delayed(const Duration(milliseconds: 120));
+
     if (_speakOnMeeting) {
-      await _speakMyLastMessage(msg);
+      await _flutterTts.speak(msg);
+      final idx = _messages.lastIndexWhere((m) => m['text'] == msg && m['isMe'] == true);
+      if (idx != -1) {
+        setState(() => _messages[idx]['spoken'] = true);
+      }
     }
 
     if (_shouldAutoscroll) _scrollToBottom();
-  }
-
-  Future<void> _speakMyLastMessage(String msg) async {
-    int lastIndex = _messages.lastIndexWhere(
-            (m) => m['isMe'] == true && m['text'] == msg && m['spoken'] == false);
-    if (lastIndex == -1) return;
-    await _flutterTts.speak(msg);
-
-    setState(() {
-      _messages[lastIndex]['spoken'] = true;
-    });
-  }
-
-  Future<void> _replaySpeak(int index) async {
-    final msg = _messages[index]['text'] ?? '';
-    if (msg.isNotEmpty) {
-      await _flutterTts.speak(msg);
-      setState(() {
-        _messages[index]['spoken'] = true;
-      });
-    }
   }
 
   Future<void> _saveCurrentMeetingToFirestore() async {
@@ -952,7 +540,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-
         title: ShaderMask(
           shaderCallback: (rect) => LinearGradient(
             colors: widget.isDarkMode
@@ -980,59 +567,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
         ),
         actions: [
           Tooltip(
-            message: "Chat History",
-            verticalOffset: 30,
-            child: Container(
-              margin: const EdgeInsets.only(right: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                gradient: LinearGradient(
-                  colors: widget.isDarkMode
-                      ? [Colors.cyanAccent.withOpacity(0.14), Colors.blueAccent.withOpacity(0.13)]
-                      : [Colors.deepPurpleAccent.withOpacity(0.11), Colors.amber.withOpacity(0.14)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: widget.isDarkMode
-                        ? Colors.cyanAccent.withOpacity(0.13)
-                        : Colors.deepPurpleAccent.withOpacity(0.07),
-                    blurRadius: 10,
-                    offset: Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: IconButton(
-                icon: Icon(
-                  Icons.history_edu_rounded,
-                  color: widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
-                  size: 27,
-                  shadows: [
-                    Shadow(
-                      color: widget.isDarkMode
-                          ? Colors.cyanAccent.withOpacity(0.22)
-                          : Colors.deepPurpleAccent.withOpacity(0.11),
-                      blurRadius: 9,
-                    ),
-                  ],
-                ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => MeetingHistoryScreen(
-                        isDark: widget.isDarkMode,
-                        userColors: _userColors,
-                      ),
-                    ),
-                  );
-                },
-                splashRadius: 26,
-              ),
-            ),
-          ),
-          Tooltip(
             message: 'Language',
             verticalOffset: 30,
             child: Container(
@@ -1052,7 +586,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                         ? Colors.cyanAccent.withOpacity(0.13)
                         : Colors.deepPurpleAccent.withOpacity(0.07),
                     blurRadius: 10,
-                    offset: Offset(0, 3),
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
@@ -1088,14 +622,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                 : Colors.blue.shade50.withOpacity(0.9),
             child: IconButton(
               icon: Icon(Icons.arrow_back, color: widget.isDarkMode ? Colors.white : Colors.black),
-              onPressed: () {
-                context.pop();
-              },
+              onPressed: () => context.pop(),
             ),
           ),
         ),
       ),
-
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -1152,183 +683,148 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                     ],
                   ),
                   Expanded(
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: (_) {
-                        _handleScroll();
-                        return false;
-                      },
-                      child: _messages.isEmpty
-                          ? Center(
-                        child: Text(
-                          context.loc.noConversationYet,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: textSecondary,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                          ),
+                    child: _messages.isEmpty
+                        ? Center(
+                      child: Text(
+                        context.loc.noConversationYet,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: textSecondary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
                         ),
-                      )
-                          : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.only(
-                            bottom: 80, left: 16, right: 16, top: 16),
-                        reverse: false,
-                        itemCount: _messages.length,
-                        itemBuilder: (context, index) {
-                          final msg = _messages[index];
-                          final isMe = msg['isMe'] ?? false;
-                          final spoken = msg['spoken'] ?? false;
-                          final color = isMe
-                              ? (widget.isDarkMode ? Colors.blue : Colors.deepPurpleAccent)
-                              : (msg['color'] ?? _userColors[index % _userColors.length]);
-                          return Align(
-                            alignment: isMe
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 360),
-                              margin: const EdgeInsets.symmetric(vertical: 7),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 10, horizontal: 15),
-                              constraints: BoxConstraints(
-                                maxWidth: size.width * 0.78,
+                      ),
+                    )
+                        : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.only(
+                          bottom: 80, left: 16, right: 16, top: 16),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, index) {
+                        final msg = _messages[index];
+                        final isMe = msg['isMe'] ?? true;
+                        final spoken = msg['spoken'] ?? false;
+                        final color = widget.isDarkMode ? Colors.blue : Colors.deepPurpleAccent;
+
+                        return Align(
+                          alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 360),
+                            margin: const EdgeInsets.symmetric(vertical: 7),
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                            constraints: BoxConstraints(maxWidth: size.width * 0.78),
+                            decoration: isMe
+                                ? BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: widget.isDarkMode
+                                    ? [Colors.blueGrey.shade900, Colors.blueGrey.shade800]
+                                    : [const Color(0xFF1E88E5), const Color(0xFF5AC8FA)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
                               ),
-                              decoration: isMe
-                                  ? BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: widget.isDarkMode
-                                      ? [Colors.blueGrey.shade900, Colors.blueGrey.shade800]
-                                      : [Color(0xFF1E88E5), Color(0xFF5AC8FA)],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: BorderRadius.circular(22),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: widget.isDarkMode
-                                        ? Colors.black.withOpacity(0.18)
-                                        : Color(0xFF1E88E5).withOpacity(0.18),
-                                    blurRadius: 18,
-                                    offset: const Offset(1, 4),
-                                  )
-                                ],
-                              )
-                                  : BoxDecoration(
-                                color: color.withOpacity(widget.isDarkMode ? 0.21 : 0.14),
-                                borderRadius: BorderRadius.circular(19),
-                                border: Border.all(
-                                  color: color.withOpacity(0.18),
-                                  width: 1,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Wrap(
-                                    crossAxisAlignment: WrapCrossAlignment.center,
-                                    spacing: 8,
-                                    runSpacing: 2,
-                                    children: [
-                                      CircleAvatar(
-                                        backgroundColor: color,
-                                        radius: 14,
-                                        child: Text(
-                                          (msg['user'] as String)[0].toUpperCase(),
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                      Text(
-                                        isMe
-                                            ? _myName
-                                            : msg['user'] as String,
-                                        style: TextStyle(
-                                          color: isMe
-                                              ? Colors.white
-                                              : color,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      if (isMe)
-                                        _speakOnMeeting
-                                            ? spoken
-                                            ? Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withOpacity(0.23),
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.volume_up_rounded,
-                                                  size: 15, color: Colors.blue),
-                                              const SizedBox(width: 2),
-                                              const Text(
-                                                'Spoken',
-                                                style: TextStyle(
-                                                  color: Colors.blue,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                              ),
-                                              IconButton(
-                                                padding: const EdgeInsets.only(left: 2, right: 2),
-                                                constraints: const BoxConstraints(),
-                                                tooltip: 'Speak again',
-                                                icon: const Icon(Icons.replay_circle_filled,
-                                                    size: 18,
-                                                    color: Colors.blueAccent),
-                                                onPressed: () => _replaySpeak(index),
-                                              ),
-                                            ],
-                                          ),
-                                        )
-                                            : const SizedBox.shrink()
-                                            : IconButton(
-                                          icon: Icon(Icons.play_circle_fill_rounded,
-                                              color: Colors.deepPurpleAccent, size: 26),
-                                          tooltip: "Tap to play this message",
-                                          onPressed: () => _replaySpeak(index),
-                                        ),
-                                      Text(
-                                        msg['time'] as String,
-                                        style: TextStyle(
-                                          color: isMe
-                                              ? Colors.white.withOpacity(0.88)
-                                              : widget.isDarkMode
-                                              ? Colors.white54
-                                              : Colors.blueGrey,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    msg['text'] as String,
-                                    style: TextStyle(
-                                      color: isMe
-                                          ? Colors.white
-                                          : widget.isDarkMode
-                                          ? Colors.white70
-                                          : Colors.blueGrey[900],
-                                      fontSize: 17.5,
-                                      fontWeight: FontWeight.w500,
-                                      letterSpacing: 0.1,
-                                    ),
-                                  ),
-                                ],
+                              borderRadius: BorderRadius.circular(22),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: widget.isDarkMode
+                                      ? Colors.black.withOpacity(0.18)
+                                      : const Color(0xFF1E88E5).withOpacity(0.18),
+                                  blurRadius: 18,
+                                  offset: const Offset(1, 4),
+                                )
+                              ],
+                            )
+                                : BoxDecoration(
+                              color: color.withOpacity(widget.isDarkMode ? 0.21 : 0.14),
+                              borderRadius: BorderRadius.circular(19),
+                              border: Border.all(
+                                color: color.withOpacity(0.18),
+                                width: 1,
                               ),
                             ),
-                          );
-                        },
-                      ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 8,
+                                  runSpacing: 2,
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundColor: isMe ? _myColor : color,
+                                      radius: 14,
+                                      child: Text(
+                                        (msg['user'] as String).isNotEmpty
+                                            ? (msg['user'] as String)[0].toUpperCase()
+                                            : '?',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      _myName,
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                    if (_speakOnMeeting && spoken)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withOpacity(0.23),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: const [
+                                            Icon(Icons.volume_up_rounded, size: 15, color: Colors.blue),
+                                            SizedBox(width: 2),
+                                            Text(
+                                              'Spoken',
+                                              style: TextStyle(
+                                                color: Colors.blue,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    Text(
+                                      msg['time'] as String,
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.white.withOpacity(0.88)
+                                            : widget.isDarkMode
+                                            ? Colors.white54
+                                            : Colors.blueGrey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  msg['text'] as String,
+                                  style: TextStyle(
+                                    color: isMe
+                                        ? Colors.white
+                                        : widget.isDarkMode
+                                        ? Colors.white70
+                                        : Colors.blueGrey[900],
+                                    fontSize: 17.5,
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: 0.1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -1476,7 +972,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                                 overCircle: true,
                                 circleColors: widget.isDarkMode
                                     ? [Colors.cyanAccent, Colors.deepPurple]
-                                    : [Color(0xFF50E3C2), Color(0xFF8E54E9)],
+                                    : [const Color(0xFF50E3C2), const Color(0xFF8E54E9)],
                                 child: const SizedBox.shrink(),
                               ),
                             ),
@@ -1501,13 +997,10 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                                   shape: BoxShape.circle,
                                   gradient: LinearGradient(
                                     colors: _isRecording
-                                        ? [
-                                      Colors.red,
-                                      Colors.deepOrange,
-                                    ]
+                                        ? [Colors.red, Colors.deepOrange]
                                         : widget.isDarkMode
                                         ? [Colors.deepPurple, Colors.cyanAccent]
-                                        : [Color(0xFF8E54E9), Color(0xFF50E3C2)],
+                                        : [const Color(0xFF8E54E9), const Color(0xFF50E3C2)],
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
                                   ),
@@ -1524,9 +1017,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
                                   ],
                                 ),
                                 child: Icon(
-                                  _isRecording
-                                      ? Icons.stop_rounded
-                                      : Icons.mic_rounded,
+                                  _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
                                   size: 30,
                                   color: Colors.white,
                                 ),
@@ -1545,12 +1036,6 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       ),
     );
   }
-}
-
-class _AudioQueueItem {
-  final File file;
-  final int label;
-  _AudioQueueItem({required this.file, required this.label});
 }
 
 class MeetingHistoryScreen extends StatelessWidget {
@@ -1572,42 +1057,29 @@ class MeetingHistoryScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         centerTitle: true,
-        iconTheme: IconThemeData(
-            color: isDark ? Colors.cyanAccent : Colors.deepPurpleAccent),
+        iconTheme: IconThemeData(color: isDark ? Colors.cyanAccent : Colors.deepPurpleAccent),
         title: ShaderMask(
           shaderCallback: (rect) => LinearGradient(
-            colors: isDark
-                ? [Colors.cyanAccent, Colors.blueAccent, Colors.white]
-                : [Colors.deepPurple, Colors.indigo, Colors.amber],
+            colors: isDark ? [Colors.cyanAccent, Colors.blueAccent, Colors.white] : [Colors.deepPurple, Colors.indigo, Colors.amber],
           ).createShader(rect),
           child: Text(
             context.loc.chatHistory,
-            style: TextStyle(
+            style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
               fontSize: 22,
               letterSpacing: 1.2,
-              shadows: [
-                Shadow(
-                  color: Colors.black.withOpacity(0.14),
-                  blurRadius: 6,
-                  offset: const Offset(1, 2),
-                ),
-              ],
+              shadows: [Shadow(color: Colors.black26, blurRadius: 6, offset: Offset(1, 2))],
             ),
           ),
         ),
         leading: Padding(
           padding: const EdgeInsets.only(left: 10),
           child: CircleAvatar(
-            backgroundColor: isDark
-                ? Colors.white.withOpacity(0.09)
-                : Colors.blue.shade50.withOpacity(0.9),
+            backgroundColor: isDark ? Colors.white.withOpacity(0.09) : Colors.blue.shade50.withOpacity(0.9),
             child: IconButton(
               icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.black),
-              onPressed: () {
-                context.pop();
-              },
+              onPressed: () => context.pop(),
             ),
           ),
         ),
@@ -1616,19 +1088,13 @@ class MeetingHistoryScreen extends StatelessWidget {
         children: [
           Container(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: bgColors,
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
+              gradient: LinearGradient(colors: bgColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
             ),
           ),
           if (!isDark)
             BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                color: Colors.white.withOpacity(0.08),
-              ),
+              child: Container(color: Colors.white.withOpacity(0.08)),
             ),
           SafeArea(
             child: Padding(
@@ -1660,18 +1126,12 @@ class MeetingHistoryScreen extends StatelessWidget {
                               const SizedBox(height: 10),
                               ShaderMask(
                                 shaderCallback: (rect) => LinearGradient(
-                                  colors: isDark
-                                      ? [Colors.cyanAccent, Colors.white]
-                                      : [Colors.deepPurple, Colors.amber],
+                                  colors: isDark ? [Colors.cyanAccent, Colors.white] : [Colors.deepPurple, Colors.amber],
                                 ).createShader(rect),
-                                child: Text(
+                                child: const Text(
                                   "No meetings yet.\nLet's talk!",
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 20,
-                                      letterSpacing: 0.3),
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20, letterSpacing: 0.3),
                                 ),
                               ),
                             ],
@@ -1687,218 +1147,170 @@ class MeetingHistoryScreen extends StatelessWidget {
                           final messages = List<Map<String, dynamic>>.from(data['messages'] ?? []);
                           final dt = DateTime.fromMillisecondsSinceEpoch(data['timestamp'] ?? 0);
 
-                          return AnimatedContainer(
-                            duration: Duration(milliseconds: 320 + (i * 25)),
-                            curve: Curves.easeInOut,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                                child: Card(
-                                  color: isDark ? Colors.white.withOpacity(0.06) : Colors.white.withOpacity(0.83),
-                                  elevation: 8,
-                                  shadowColor: isDark ? Colors.cyanAccent.withOpacity(0.11) : Colors.amber.withOpacity(0.13),
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                      side: BorderSide(
-                                        width: 1.5,
-                                        color: isDark
-                                            ? Colors.cyanAccent.withOpacity(0.12)
-                                            : Colors.deepPurpleAccent.withOpacity(0.09),
-                                      )
-                                  ),
-                                  child: Theme(
-                                    data: Theme.of(context).copyWith(
-                                      dividerColor: Colors.transparent,
-                                      splashColor: Colors.amber.withOpacity(0.09),
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: Card(
+                              color: isDark ? Colors.white.withOpacity(0.06) : Colors.white.withOpacity(0.83),
+                              elevation: 8,
+                              shadowColor: isDark ? Colors.cyanAccent.withOpacity(0.11) : Colors.amber.withOpacity(0.13),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                                side: BorderSide(
+                                  width: 1.5,
+                                  color: isDark ? Colors.cyanAccent.withOpacity(0.12) : Colors.deepPurpleAccent.withOpacity(0.09),
+                                ),
+                              ),
+                              child: Theme(
+                                data: Theme.of(context).copyWith(dividerColor: Colors.transparent, splashColor: Colors.amber.withOpacity(0.09)),
+                                child: ExpansionTile(
+                                  initiallyExpanded: i == 0,
+                                  collapsedBackgroundColor: Colors.transparent,
+                                  backgroundColor: Colors.transparent,
+                                  title: ShaderMask(
+                                    shaderCallback: (rect) => LinearGradient(
+                                      colors: isDark ? [Colors.cyanAccent, Colors.white] : [Colors.deepPurple, Colors.indigo, Colors.amber],
+                                    ).createShader(rect),
+                                    child: Text(
+                                      data['title'] ?? context.loc.groupChat,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 18,
+                                        letterSpacing: 0.6,
+                                        shadows: [Shadow(color: Colors.black26, blurRadius: 7, offset: Offset(1, 2))],
+                                      ),
                                     ),
-                                    child: ExpansionTile(
-                                      initiallyExpanded: i == 0,
-                                      collapsedBackgroundColor: Colors.transparent,
-                                      backgroundColor: Colors.transparent,
-                                      title: ShaderMask(
-                                        shaderCallback: (rect) => LinearGradient(
-                                          colors: isDark
-                                              ? [Colors.cyanAccent, Colors.white]
-                                              : [Colors.deepPurple, Colors.indigo, Colors.amber],
-                                        ).createShader(rect),
-                                        child: Text(
-                                          data['title'] ?? context.loc.groupChat,
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 18,
-                                            letterSpacing: 0.6,
-                                            shadows: [
-                                              Shadow(
-                                                  color: isDark ? Colors.cyanAccent.withOpacity(0.16) : Colors.deepPurpleAccent.withOpacity(0.15),
-                                                  blurRadius: 7,
-                                                  offset: Offset(1, 2)
-                                              )
-                                            ],
-                                          ),
-                                        ),
+                                  ),
+                                  subtitle: Row(
+                                    children: [
+                                      Icon(Icons.calendar_today, size: 16, color: isDark ? Colors.white60 : Colors.blueGrey),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} @ "
+                                            "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}",
+                                        style: TextStyle(color: isDark ? Colors.white60 : Colors.blueGrey, fontSize: 14.5),
                                       ),
-                                      subtitle: Row(
+                                    ],
+                                  ),
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 13, left: 12, right: 12, top: 3),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Icon(Icons.calendar_today, size: 16, color: isDark ? Colors.white60 : Colors.blueGrey),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} @ "
-                                                "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}",
-                                            style: TextStyle(
-                                              color: isDark ? Colors.white60 : Colors.blueGrey,
-                                              fontSize: 14.5,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.only(bottom: 13, left: 12, right: 12, top: 3),
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Padding(
-                                                padding: const EdgeInsets.symmetric(vertical: 3),
-                                                child: ShaderMask(
-                                                  shaderCallback: (rect) => LinearGradient(
-                                                    colors: isDark
-                                                        ? [Colors.cyanAccent, Colors.white]
-                                                        : [Colors.deepPurple, Colors.amber],
-                                                  ).createShader(rect),
-                                                  child: Text(
-                                                    context.loc.conversation,
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight: FontWeight.bold,
-                                                      fontSize: 15.8,
-                                                      letterSpacing: 0.5,
-                                                    ),
-                                                  ),
+                                          Padding(
+                                            padding: const EdgeInsets.symmetric(vertical: 3),
+                                            child: ShaderMask(
+                                              shaderCallback: (rect) => LinearGradient(
+                                                colors: isDark ? [Colors.cyanAccent, Colors.white] : [Colors.deepPurple, Colors.amber],
+                                              ).createShader(rect),
+                                              child: Text(
+                                                context.loc.conversation,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 15.8,
+                                                  letterSpacing: 0.5,
                                                 ),
                                               ),
-                                              const SizedBox(height: 2),
-                                              ...messages.asMap().entries.map((entry) {
-                                                final msg = entry.value;
-                                                final isMe = msg['isMe'] ?? false;
-                                                final color = isMe
-                                                    ? (isDark ? Colors.cyanAccent : Colors.deepPurpleAccent)
-                                                    : userColors[entry.key % userColors.length];
-                                                return Padding(
-                                                  padding: const EdgeInsets.symmetric(vertical: 6),
-                                                  child: Row(
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Container(
-                                                        decoration: BoxDecoration(
-                                                          gradient: LinearGradient(
-                                                            colors: [
-                                                              color.withOpacity(0.82),
-                                                              color.withOpacity(0.66)
-                                                            ],
-                                                            begin: Alignment.topLeft,
-                                                            end: Alignment.bottomRight,
-                                                          ),
-                                                          borderRadius: BorderRadius.circular(50),
-                                                        ),
-                                                        child: CircleAvatar(
-                                                          backgroundColor: Colors.transparent,
-                                                          radius: 16,
-                                                          child: Text(
-                                                            (msg['user'] as String?)?.isNotEmpty == true
-                                                                ? (msg['user'] as String)[0].toUpperCase()
-                                                                : "?",
-                                                            style: const TextStyle(
-                                                                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 10),
-                                                      Expanded(
-                                                        child: AnimatedContainer(
-                                                          duration: const Duration(milliseconds: 340),
-                                                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 13),
-                                                          decoration: BoxDecoration(
-                                                            color: color.withOpacity(isMe ? 0.19 : 0.16),
-                                                            borderRadius: BorderRadius.circular(15),
-                                                            border: Border.all(
-                                                              color: color.withOpacity(0.22),
-                                                              width: 1.1,
-                                                            ),
-                                                            boxShadow: [
-                                                              BoxShadow(
-                                                                color: color.withOpacity(0.08),
-                                                                blurRadius: 8,
-                                                                offset: Offset(0, 3),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                          child: Column(
-                                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                                            children: [
-                                                              Row(
-                                                                children: [
-                                                                  Text(
-                                                                    msg['user'] ?? '',
-                                                                    style: TextStyle(
-                                                                      fontWeight: FontWeight.bold,
-                                                                      color: color,
-                                                                      fontSize: 14.5,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(width: 6),
-                                                                  if (isMe)
-                                                                    Container(
-                                                                      decoration: BoxDecoration(
-                                                                        color: Colors.amber.withOpacity(0.12),
-                                                                        borderRadius: BorderRadius.circular(9),
-                                                                      ),
-                                                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                                      child: Row(
-                                                                        children: [
-                                                                          Icon(Icons.verified, size: 14, color: Colors.amber),
-                                                                          SizedBox(width: 2),
-                                                                          Text("You", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.w700, fontSize: 11)),
-                                                                        ],
-                                                                      ),
-                                                                    ),
-                                                                ],
-                                                              ),
-                                                              const SizedBox(height: 3),
-                                                              Text(
-                                                                msg['text'] ?? '',
-                                                                style: TextStyle(
-                                                                  color: isDark ? Colors.white.withOpacity(0.92) : Colors.black87,
-                                                                  fontSize: 15.1,
-                                                                  height: 1.26,
-                                                                ),
-                                                              ),
-                                                              const SizedBox(height: 4),
-                                                              Align(
-                                                                alignment: Alignment.bottomRight,
-                                                                child: Text(
-                                                                  msg['time'] ?? '',
-                                                                  style: TextStyle(
-                                                                    color: isDark ? Colors.white54 : Colors.blueGrey,
-                                                                    fontSize: 12,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                );
-                                              }),
-                                            ],
+                                            ),
                                           ),
-                                        )
-                                      ],
-                                    ),
-                                  ),
+                                          const SizedBox(height: 2),
+                                          ...messages.asMap().entries.map((entry) {
+                                            final msg = entry.value;
+                                            final color = isDark ? Colors.cyanAccent : Colors.deepPurpleAccent;
+                                            final isMe = msg['isMe'] ?? true;
+                                            return Padding(
+                                              padding: const EdgeInsets.symmetric(vertical: 6),
+                                              child: Row(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Container(
+                                                    decoration: BoxDecoration(
+                                                      gradient: LinearGradient(
+                                                        colors: [color.withOpacity(0.82), color.withOpacity(0.66)],
+                                                        begin: Alignment.topLeft,
+                                                        end: Alignment.bottomRight,
+                                                      ),
+                                                      borderRadius: BorderRadius.circular(50),
+                                                    ),
+                                                    child: CircleAvatar(
+                                                      backgroundColor: Colors.transparent,
+                                                      radius: 16,
+                                                      child: Text(
+                                                        (msg['user'] as String?)?.isNotEmpty == true
+                                                            ? (msg['user'] as String)[0].toUpperCase()
+                                                            : "?",
+                                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  Expanded(
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 13),
+                                                      decoration: BoxDecoration(
+                                                        color: color.withOpacity(isMe ? 0.19 : 0.16),
+                                                        borderRadius: BorderRadius.circular(15),
+                                                        border: Border.all(color: color.withOpacity(0.22), width: 1.1),
+                                                        boxShadow: [BoxShadow(color: color.withOpacity(0.08), blurRadius: 8, offset: const Offset(0, 3))],
+                                                      ),
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        children: [
+                                                          Row(
+                                                            children: [
+                                                              Text(
+                                                                msg['user'] ?? '',
+                                                                style: TextStyle(fontWeight: FontWeight.bold, color: color, fontSize: 14.5),
+                                                              ),
+                                                              const SizedBox(width: 6),
+                                                              if (isMe)
+                                                                Container(
+                                                                  decoration: BoxDecoration(
+                                                                    color: Colors.amber.withOpacity(0.12),
+                                                                    borderRadius: BorderRadius.circular(9),
+                                                                  ),
+                                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                                  child: Row(
+                                                                    children: const [
+                                                                      Icon(Icons.verified, size: 14, color: Colors.amber),
+                                                                      SizedBox(width: 2),
+                                                                      Text("You", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.w700, fontSize: 11)),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                            ],
+                                                          ),
+                                                          const SizedBox(height: 3),
+                                                          Text(
+                                                            msg['text'] ?? '',
+                                                            style: TextStyle(
+                                                              color: isDark ? Colors.white.withOpacity(0.92) : Colors.black87,
+                                                              fontSize: 15.1,
+                                                              height: 1.26,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(height: 4),
+                                                          Align(
+                                                            alignment: Alignment.bottomRight,
+                                                            child: Text(
+                                                              msg['time'] ?? '',
+                                                              style: TextStyle(color: isDark ? Colors.white54 : Colors.blueGrey, fontSize: 12),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          }),
+                                        ],
+                                      ),
+                                    )
+                                  ],
                                 ),
                               ),
                             ),
