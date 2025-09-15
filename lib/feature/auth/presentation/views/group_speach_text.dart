@@ -44,6 +44,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   StreamSubscription<Uint8List>? _audioStreamSub;
   final List<int> _pcmBuffer = [];
   Timer? _keepAliveTimer;
+  Timer? _ephemeralKeyTimer;
   int _reconnectAttempts = 0;
   String? _sessionLanguage;
   String _transcribedText = "";  // Final transcript text
@@ -153,6 +154,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
     _silenceTimer?.cancel();
     _audioStreamSub?.cancel();
     _keepAliveTimer?.cancel();
+    _ephemeralKeyTimer?.cancel();
     _openAiChannel?.sink.close();
     _recorder.dispose();
     _micGlowController.dispose();
@@ -272,6 +274,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
   /// 1) Fetch ephemeral key and connect to OpenAI Realtime websocket
   Future<void> _initOpenAIConnection() async {
     try {
+      await _openAiChannel?.sink.close();
       final keyResp = await http
           .get(Uri.parse('${ApiConstants.baseUrl}/get-ephemeral-key'));
       if (keyResp.statusCode != 200) {
@@ -281,6 +284,17 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen> with 
       // ✅ Extract client_secret.value instead of "id"
       final body = jsonDecode(keyResp.body);
       final ephKey = body['client_secret']?['value'];
+      final expiresAt = body['client_secret']?['expires_at'];
+
+      if (expiresAt != null) {
+        final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final refreshIn = expiresAt - nowSec - 5;
+        if (refreshIn > 0) {
+          _ephemeralKeyTimer?.cancel();
+          _ephemeralKeyTimer =
+              Timer(Duration(seconds: refreshIn), _initOpenAIConnection);
+        }
+      }
 
       const url =
           'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview';
