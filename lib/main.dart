@@ -4,13 +4,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:showcaseview/showcaseview.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'feature/common_widgets/custom_toast.dart';
 import 'core/utils/routing/routes_generator.dart';
 import 'dart:async';
+
+import 'l10n/app_localizations.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
