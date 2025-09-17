@@ -48,4 +48,15 @@ static const String elevenLabsSpeechToText =
     "${_elevenLabsBaseUrl}/speech-to-text";
 static const String elevenLabsModelId = 'scribe_v1';
 static const String elevenLabsLanguage = 'en';
+
+static Uri get streamSpeakerTranscribeUri {
+  final baseUri = Uri.parse(baseUrl);
+  final isSecure = baseUri.scheme == 'https';
+  return Uri(
+    scheme: isSecure ? 'wss' : 'ws',
+    host: baseUri.host,
+    port: 8000,
+    path: 'stream_speaker_transcribe',
+  );
+}
 }
