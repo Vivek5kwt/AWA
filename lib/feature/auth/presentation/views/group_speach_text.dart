@@ -249,13 +249,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     await _disconnectTranscriptionSocket();
 
     final uri = ApiConstants.streamSpeakerTranscribeUri;
+    print('geteted the url $uri');
     try {
       final channel = kIsWeb
           ? WebSocketChannel.connect(uri)
           : IOWebSocketChannel.connect(
-              uri,
-              pingInterval: const Duration(seconds: 10),
-            );
+        uri,
+        pingInterval: const Duration(seconds: 20),
+      );
       _socketChannel = channel;
       _socketConnected = true;
       _socketSubscription = channel.stream.listen(
@@ -316,6 +317,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         return;
       }
       final payload = decoded;
+      _logBackendResponse(payload);
       if (payload['error'] != null) {
         // ignore: avoid_print
         print('Backend reported error: ${payload['error']}');
@@ -384,6 +386,9 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     });
     _resetSilenceTimer();
 
+    // ignore: avoid_print
+    print('🎙️ Streaming audio as 16kHz PCM16 mono frames to backend...');
+
     // fun mic wave
     _amplitudeTimer?.cancel();
     _amplitudeTimer = Timer.periodic(const Duration(milliseconds: 48), (_) {
@@ -416,6 +421,19 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         print('Error sending audio frame: $e');
       }
     });
+  }
+
+  void _logBackendResponse(Map<String, dynamic> payload) {
+    if (!kDebugMode) return;
+    try {
+      const encoder = JsonEncoder.withIndent('  ');
+      final formatted = encoder.convert(payload);
+      // ignore: avoid_print
+      print('Backend response:\n$formatted');
+    } catch (_) {
+      // ignore: avoid_print
+      print('Backend response: ${payload.toString()}');
+    }
   }
 
   Future<void> _stopListening() async {
@@ -771,7 +789,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                         final participantColor =
                             (msg['color'] as Color?) ?? fallbackColor;
                         final participantName =
-                            isMe ? _myName : (msg['user'] as String? ?? 'Participant');
+                        isMe ? _myName : (msg['user'] as String? ?? 'Participant');
 
                         return Align(
                           alignment: isMe
@@ -855,8 +873,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                         color: isMe
                                             ? Colors.white
                                             : widget.isDarkMode
-                                                ? Colors.white
-                                                : participantColor,
+                                            ? Colors.white
+                                            : participantColor,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 16,
                                       ),
@@ -868,14 +886,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                         decoration: BoxDecoration(
                                           color: participantColor
                                               .withOpacity(widget.isDarkMode
-                                                  ? 0.25
-                                                  : 0.18),
+                                              ? 0.25
+                                              : 0.18),
                                           borderRadius:
-                                              BorderRadius.circular(8),
+                                          BorderRadius.circular(8),
                                         ),
                                         child: Text(
                                           'Conf. '
-                                          '${(msg['confidence'] as num?)?.toStringAsFixed(2) ?? '-'}',
+                                              '${(msg['confidence'] as num?)?.toStringAsFixed(2) ?? '-'}',
                                           style: TextStyle(
                                             color: widget.isDarkMode
                                                 ? Colors.white
