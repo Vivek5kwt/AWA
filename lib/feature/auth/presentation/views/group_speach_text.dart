@@ -7,14 +7,15 @@ import 'dart:ui';
 import 'package:awa/config/local_extension.dart';
 import 'package:awa/core/network/http_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
-import 'package:openai_realtime_dart/openai_realtime_dart.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wave_blob/wave_blob.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
@@ -35,14 +36,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   bool _isRecording = false;
   double _amplitude = 0;
   Timer? _amplitudeTimer;
-  bool _manualStop = false;
   late AnimationController _micGlowController;
 
   final AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _audioStreamSub;
 
-  RealtimeClient? _client;
-  bool _clientConnected = false;
+  WebSocketChannel? _socketChannel;
+  StreamSubscription? _socketSubscription;
+  bool _socketConnected = false;
 
   final List<Map<String, dynamic>> _messages = [];
 
@@ -70,11 +71,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   Timer? _silenceTimer;
   final Duration _silenceDuration = const Duration(minutes: 2);
 
-  // ===== sentence accumulation (only final sentence is shown) =====
-  String _turnAcc = '';                 // running transcript for current turn
-  Timer? _turnGapTimer;                 // silence→finalize timer
-  static const _turnGap = Duration(milliseconds: 1200);
-  // =================================================================
+  final Map<String, Color> _speakerColors = {};
 
   @override
   void initState() {
@@ -114,6 +111,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       setState(() {
         _messages.clear();
         _messages.addAll(List<Map<String, dynamic>>.from(data['messages'] ?? []));
+        for (final msg in _messages) {
+          final isMe = msg['isMe'] ?? false;
+          if (!isMe) {
+            final formattedName = _formatSpeakerName(msg['user'] as String?);
+            msg['user'] = formattedName;
+            msg['color'] = _colorForSpeaker(formattedName);
+          }
+        }
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
@@ -140,8 +145,8 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _amplitudeTimer?.cancel();
     _latestSentenceTimer?.cancel();
     _silenceTimer?.cancel();
-    _turnGapTimer?.cancel();
     _audioStreamSub?.cancel();
+    _disconnectTranscriptionSocket();
     _recorder.dispose();
     _micGlowController.dispose();
     _textController.dispose();
@@ -205,174 +210,183 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     return s[0].toUpperCase() + s.substring(1);
   }
 
-  // --- helpers for clean accumulation ---
+  String _formatSpeakerName(String? name) {
+    final raw = (name ?? '').trim();
+    if (raw.isEmpty) return 'Unknown Speaker';
+    final parts = raw.split(RegExp(r'\s+')).where((p) => p.trim().isNotEmpty);
+    return parts
+        .map((part) => _capitalize(part.toLowerCase()))
+        .join(' ')
+        .trim();
+  }
+
+  Color _colorForSpeaker(String speaker) {
+    final formatted = _formatSpeakerName(speaker);
+    if (_speakerColors.containsKey(formatted)) {
+      return _speakerColors[formatted]!;
+    }
+    const palette = [
+      Color(0xFF1E88E5),
+      Color(0xFF43A047),
+      Color(0xFF8E24AA),
+      Color(0xFFEF6C00),
+      Color(0xFF00838F),
+      Color(0xFF6D4C41),
+      Color(0xFF3949AB),
+      Color(0xFF5E35B1),
+      Color(0xFF0097A7),
+    ];
+    final index = formatted.hashCode.abs() % palette.length;
+    final color = palette[index];
+    _speakerColors[formatted] = color;
+    return color;
+  }
+
   String _normalizeSpaces(String s) =>
       s.replaceAll(RegExp(r'\s+', unicode: true), ' ').trim();
 
-  bool _isOnlyPunct(String s) =>
-      RegExp(r'^[\p{P}\p{S}]+$', unicode: true).hasMatch(s);
+  Future<void> _connectTranscriptionSocket() async {
+    await _disconnectTranscriptionSocket();
 
-  void _ingestDelta(String partRaw) {
-    final part = _normalizeSpaces(partRaw);
-    if (part.isEmpty) return;
-
-    // A) cumulative running transcript
-    if (_turnAcc.isNotEmpty &&
-        part.length >= _turnAcc.length &&
-        part.startsWith(_turnAcc)) {
-      _turnAcc = part;
-    } else {
-      // B) incremental tokens: append smartly
-      if (_turnAcc.isEmpty) {
-        _turnAcc = part;
-      } else if (_isOnlyPunct(part)) {
-        _turnAcc = (_turnAcc + part); // attach punctuation without space
-      } else {
-        _turnAcc = '$_turnAcc $part';
-      }
-      _turnAcc = _normalizeSpaces(_turnAcc);
-    }
-
-    _scheduleTurnFinalize();
-  }
-
-  void _scheduleTurnFinalize() {
-    _turnGapTimer?.cancel();
-    _turnGapTimer = Timer(_turnGap, () {
-      final t = _normalizeSpaces(_turnAcc);
-      if (t.isEmpty) return;
-
-      // If final buffer is only punctuation, merge into last message instead
-      if (_isOnlyPunct(t)) {
-        if (_messages.isNotEmpty) {
-          final last = _messages.last;
-          final lastText = (last['text'] ?? '') as String;
-          if (last['isFinal'] == true && (lastText).trim().isNotEmpty) {
-            setState(() {
-              last['text'] = _normalizeSpaces('$lastText$t');
-              last['time'] = TimeOfDay.now().format(context);
-            });
-            _saveCurrentMeetingToFirestore();
-          }
-        }
-      } else {
-        _addFinalTurnBubble(t);
-      }
-
-      _turnAcc = '';
-    });
-  }
-
-  void _addFinalTurnBubble(String text) {
-    final t = _normalizeSpaces(text);
-    if (t.isEmpty) return;
-
-    setState(() {
-      _messages.add({
-        'user': _myName,
-        'text': t,
-        'time': TimeOfDay.now().format(context),
-        'isMe': true,
-        'isFinal': true,
-      });
-      _latestSentence = t;
-    });
-
-    _latestSentenceTimer?.cancel();
-    _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
-      if (!mounted) return;
-      setState(() => _latestSentence = '');
-    });
-
-    _saveCurrentMeetingToFirestore();
-    if (_shouldAutoscroll) _scrollToBottom(animate: false);
-  }
-
-  /// Connect to OpenAI Realtime (transcription only). We listen to deltas
-  /// and finalize a sentence after short silence.
-  Future<void> _initRealtimeClient() async {
+    final uri = ApiConstants.streamSpeakerTranscribeUri;
     try {
-      final keyResp = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}/get-ephemeral-key'),
+      final channel = kIsWeb
+          ? WebSocketChannel.connect(uri)
+          : IOWebSocketChannel.connect(
+              uri,
+              pingInterval: const Duration(seconds: 10),
+            );
+      _socketChannel = channel;
+      _socketConnected = true;
+      _socketSubscription = channel.stream.listen(
+        _handleSocketMessage,
+        onError: (error) {
+          // ignore: avoid_print
+          print('WebSocket error: $error');
+          _socketConnected = false;
+          Future.microtask(_disconnectTranscriptionSocket);
+        },
+        onDone: () {
+          // ignore: avoid_print
+          print('WebSocket connection closed.');
+          _socketConnected = false;
+          Future.microtask(_disconnectTranscriptionSocket);
+        },
+        cancelOnError: true,
       );
-      if (keyResp.statusCode != 200) {
-        throw Exception('Failed to fetch ephemeral key');
-      }
-      final body = jsonDecode(keyResp.body);
-      final ephKey = body['client_secret']?['value'];
-
-      final client = RealtimeClient(apiKey: ephKey);
-
-      await client.updateSession(
-        instructions:
-        'Only transcribe user speech. Do NOT answer questions or add any assistant replies.',
-        turnDetection: TurnDetection(type: TurnDetectionType.serverVad),
-        inputAudioTranscription: InputAudioTranscriptionConfig(
-          model: 'whisper-1',
-        ),
-      );
-
-      // Use deltas; accumulate and show only final sentence (no token flicker)
-      client.on(RealtimeEventType.conversationUpdated, (event) {
-        final ev = event as RealtimeEventConversationUpdated;
-        final delta = ev.result.delta;
-
-        final part = delta?.transcript;
-        if (part != null && part.isNotEmpty) {
-          _ingestDelta(part); // accumulate smartly
-        }
-      });
-
-      // Optional: if a final transcription item arrives, commit it
-      client.on(RealtimeEventType.conversationItemCompleted, (event) {
-        try {
-          final completed = event as RealtimeEventConversationItemCompleted;
-          final itm = completed.item;
-          final inner = (itm as dynamic).item;
-          final transcript = (inner as dynamic).transcript as String?;
-          final normalized = _normalizeSpaces(transcript ?? '');
-          if (normalized.isNotEmpty) {
-            _turnGapTimer?.cancel();
-            _turnAcc = '';
-            _addFinalTurnBubble(normalized);
-          }
-        } catch (_) {
-          // not a transcription item; safe to ignore
-        }
-      });
-
-      client.on(RealtimeEventType.error, (event) {
-        final err = (event as RealtimeEventError).error;
-        // ignore: avoid_print
-        print('Realtime error: $err');
-      });
-
-      await client.connect(model: 'gpt-4o-mini-realtime-preview');
-      _client = client;
-      _clientConnected = true;
 
       // ignore: avoid_print
-      print("✅ Connected to OpenAI Realtime (transcription only; no assistant replies).");
+      print('✅ Connected to speaker transcription socket at $uri');
     } catch (e) {
       // ignore: avoid_print
-      print("❌ Error connecting realtime client: $e");
-      _clientConnected = false;
+      print('❌ Error connecting transcription socket: $e');
+      _socketConnected = false;
     }
   }
 
-  /// Start recording & stream audio frames to Realtime client
+  Future<void> _disconnectTranscriptionSocket() async {
+    await _socketSubscription?.cancel();
+    _socketSubscription = null;
+    try {
+      await _socketChannel?.sink.close();
+    } catch (_) {
+      // ignore close errors
+    }
+    _socketChannel = null;
+    _socketConnected = false;
+  }
+
+  void _handleSocketMessage(dynamic message) {
+    if (!mounted) return;
+
+    try {
+      String jsonString;
+      if (message is String) {
+        jsonString = message;
+      } else if (message is List<int>) {
+        jsonString = utf8.decode(message);
+      } else {
+        jsonString = jsonEncode(message);
+      }
+
+      final decoded = jsonDecode(jsonString);
+      if (decoded is! Map<String, dynamic>) {
+        // ignore: avoid_print
+        print('Unexpected payload from socket: $decoded');
+        return;
+      }
+      final payload = decoded;
+      _logBackendResponse(payload);
+      if (payload['error'] != null) {
+        // ignore: avoid_print
+        print('Backend reported error: ${payload['error']}');
+        return;
+      }
+
+      final transcriptRaw = payload['transcript'];
+      final transcript = _normalizeSpaces(transcriptRaw?.toString() ?? '');
+      if (transcript.isEmpty) return;
+
+      final speakerName = _formatSpeakerName(payload['speaker'] as String?);
+      final language = payload['language'];
+      final confidence = payload['confidence'];
+      final similarityScores = payload['similarity_scores'];
+      final timing = payload['timing'];
+
+      final isMySpeaker =
+          speakerName.toLowerCase() == _myName.toLowerCase();
+      final color = isMySpeaker ? _myColor : _colorForSpeaker(speakerName);
+
+      if (_isRecording) {
+        _resetSilenceTimer();
+      }
+
+      setState(() {
+        _messages.add({
+          'user': speakerName,
+          'text': transcript,
+          'time': TimeOfDay.now().format(context),
+          'isMe': isMySpeaker,
+          'isFinal': true,
+          'confidence': confidence,
+          'language': language,
+          'similarity_scores': similarityScores,
+          'timing': timing,
+          'color': color,
+          'spoken': false,
+        });
+        _latestSentence = transcript;
+      });
+
+      _latestSentenceTimer?.cancel();
+      _latestSentenceTimer = Timer(const Duration(seconds: 5), () {
+        if (!mounted) return;
+        setState(() => _latestSentence = '');
+      });
+
+      _saveCurrentMeetingToFirestore();
+      if (_shouldAutoscroll) _scrollToBottom(animate: false);
+    } catch (e) {
+      // ignore: avoid_print
+      print('Failed to parse socket message: $e');
+    }
+  }
+
+  /// Start recording & stream audio frames to backend socket
   Future<void> _startListening() async {
     if (!await _recorder.hasPermission()) return;
 
-    _manualStop = false;
-    await _initRealtimeClient();
+    await _connectTranscriptionSocket();
 
-    if (!_clientConnected) return;
+    if (!_socketConnected) return;
 
     setState(() {
       _isRecording = true;
     });
     _resetSilenceTimer();
+
+    // ignore: avoid_print
+    print('🎙️ Streaming audio as 16kHz PCM16 mono frames to backend...');
 
     // fun mic wave
     _amplitudeTimer?.cancel();
@@ -396,42 +410,32 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     final stream = await _recorder.startStream(config);
 
     _audioStreamSub = stream.listen((data) async {
-      if (!_clientConnected) return;
+      if (!_socketConnected) return;
       final bytes = data is Uint8List ? data : Uint8List.fromList(data);
       if (bytes.every((b) => b == 0)) return; // ignore pure silence frames
       try {
-        await _client!.appendInputAudio(bytes);
-        // Do NOT call createResponse() — we only transcribe.
+        _socketChannel?.sink.add(bytes);
       } catch (e) {
         // ignore: avoid_print
-        print('appendInputAudio error: $e');
+        print('Error sending audio frame: $e');
       }
     });
   }
 
-  Future<void> _stopListening() async {
-    _manualStop = true;
-
-    // Commit any remaining buffered sentence
-    _turnGapTimer?.cancel();
-    final leftover = _normalizeSpaces(_turnAcc);
-    if (leftover.isNotEmpty) {
-      if (_isOnlyPunct(leftover) && _messages.isNotEmpty) {
-        final last = _messages.last;
-        final lastText = (last['text'] ?? '') as String;
-        if (last['isFinal'] == true && (lastText).trim().isNotEmpty) {
-          setState(() {
-            last['text'] = _normalizeSpaces('$lastText$leftover');
-            last['time'] = TimeOfDay.now().format(context);
-          });
-          _saveCurrentMeetingToFirestore();
-        }
-      } else {
-        _addFinalTurnBubble(leftover);
-      }
+  void _logBackendResponse(Map<String, dynamic> payload) {
+    if (!kDebugMode) return;
+    try {
+      const encoder = JsonEncoder.withIndent('  ');
+      final formatted = encoder.convert(payload);
+      // ignore: avoid_print
+      print('Backend response:\n$formatted');
+    } catch (_) {
+      // ignore: avoid_print
+      print('Backend response: ${payload.toString()}');
     }
-    _turnAcc = '';
+  }
 
+  Future<void> _stopListening() async {
     setState(() {
       _isRecording = false;
       _amplitude = 0;
@@ -440,7 +444,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     _amplitudeTimer?.cancel();
     await _audioStreamSub?.cancel();
     await _recorder.stop();
-    // No response finalize call; we rely on deltas + gap finalize.
+    await _disconnectTranscriptionSocket();
   }
 
   bool _isTextInLanguage(String text, String languageCode) {
@@ -778,9 +782,13 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                         final msg = _messages[index];
                         final isMe = msg['isMe'] ?? true;
                         final spoken = msg['spoken'] ?? false;
-                        final color = widget.isDarkMode
+                        final fallbackColor = widget.isDarkMode
                             ? Colors.blue
                             : Colors.deepPurpleAccent;
+                        final participantColor =
+                            (msg['color'] as Color?) ?? fallbackColor;
+                        final participantName =
+                            isMe ? _myName : (msg['user'] as String? ?? 'Participant');
 
                         return Align(
                           alignment: isMe
@@ -824,12 +832,12 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                               ],
                             )
                                 : BoxDecoration(
-                              color: color.withOpacity(
+                              color: participantColor.withOpacity(
                                   widget.isDarkMode ? 0.21 : 0.14),
                               borderRadius:
                               BorderRadius.circular(19),
                               border: Border.all(
-                                color: color.withOpacity(0.18),
+                                color: participantColor.withOpacity(0.18),
                                 width: 1,
                               ),
                             ),
@@ -845,11 +853,11 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                   children: [
                                     CircleAvatar(
                                       backgroundColor:
-                                      isMe ? _myColor : color,
+                                      isMe ? _myColor : participantColor,
                                       radius: 14,
                                       child: Text(
-                                        (msg['user'] as String).isNotEmpty
-                                            ? (msg['user'] as String)[0]
+                                        participantName.isNotEmpty
+                                            ? participantName[0]
                                             .toUpperCase()
                                             : '?',
                                         style: const TextStyle(
@@ -859,13 +867,41 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
                                       ),
                                     ),
                                     Text(
-                                      _myName,
-                                      style: const TextStyle(
-                                        color: Colors.white,
+                                      participantName,
+                                      style: TextStyle(
+                                        color: isMe
+                                            ? Colors.white
+                                            : widget.isDarkMode
+                                                ? Colors.white
+                                                : participantColor,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 16,
                                       ),
                                     ),
+                                    if (!isMe && msg['confidence'] != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: participantColor
+                                              .withOpacity(widget.isDarkMode
+                                                  ? 0.25
+                                                  : 0.18),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          'Conf. '
+                                          '${(msg['confidence'] as num?)?.toStringAsFixed(2) ?? '-'}',
+                                          style: TextStyle(
+                                            color: widget.isDarkMode
+                                                ? Colors.white
+                                                : participantColor,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
                                     if (_speakOnMeeting && spoken)
                                       Container(
                                         padding:
