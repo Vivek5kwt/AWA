@@ -258,6 +258,7 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen>
       final endpoint = widget.isUpdate
           ? ApiConstants.updateUserProfile
           : ApiConstants.registerUser;
+      print('dshdsjdsh $endpoint');
       Uri uri = Uri.parse(endpoint);
 
       var req = await _buildRequest(uri);

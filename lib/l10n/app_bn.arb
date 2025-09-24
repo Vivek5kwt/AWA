@@ -86,12 +86,13 @@
   "other":"অন্যান্য",
   "trialExpired":"বিচারের মেয়াদ শেষ",
   "hindi": "হিন্দি",
-  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
+  "nameFieldIntro":"বক্তার নাম যোগ করুন যাতে আপনি সহজেই তাদের কণ্ঠস্বর চিনতে পারেন।",
   "repeatSentenceHint":"সমস্ত প্রশ্ন সম্পূর্ণ করতে প্রদর্শিত বাক্যটি পুনরাবৃত্তি করুন।",
   "speakerListIntro":"এই স্ক্রিনে আপনার নিবন্ধিত স্পিকারগুলির তালিকা রয়েছে।",
   "speakerAddIntro":"নতুন ভয়েস নিবন্ধন করতে স্পিকার যোগ করুন-এ ট্যাপ করুন।",
-  "friendListIntro":"Browse people and send them a friend request.",
-  "friendAddIntro":"Tap the add icon to connect and start chatting.",
-  "friendBookIntro":"Your approved friends appear here.",
-  "friendChatIntro":"Tap the chat bubble to start a conversation."
+  "friendListIntro":"লোকেদের ব্রাউজ করুন এবং তাদের একটি বন্ধুত্বের অনুরোধ পাঠান।",
+  "friendAddIntro":"সংযোগ করতে এবং চ্যাট শুরু করতে অ্যাড আইকনে ট্যাপ করুন।",
+  "friendBookIntro":"আপনার অনুমোদিত বন্ধুরা এখানে উপস্থিত হবে।",
+  "friendChatIntro":"কথোপকথন শুরু করতে চ্যাট বাবলে ট্যাপ করুন।",
+  "permissionRequiredMic":"মাইকের অনুমতি প্রয়োজন"
 }

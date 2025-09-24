@@ -86,12 +86,14 @@
   "other":"ਹੋਰ",
   "hindi": "ਹਿੰਦੀ",
   "trialExpired":"ਮੁਕੱਦਮੇ ਦੀ ਮਿਆਦ ਪੁੱਗ ਗਈ",
-  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
+  "nameFieldIntro":"ਬੋਲਣ ਵਾਲੇ ਦੀ ਆਵਾਜ਼ ਨੂੰ ਆਸਾਨੀ ਨਾਲ ਪਛਾਣਨ ਲਈ ਉਸਦਾ ਨਾਮ ਸ਼ਾਮਲ ਕਰੋ।",
   "repeatSentenceHint":"ਸਾਰੇ ਸਵਾਲ ਪੂਰੇ ਕਰਨ ਲਈ ਪ੍ਰਦਰਸ਼ਿਤ ਵਾਕ ਨੂੰ ਦੁਹਰਾਓ।",
   "speakerListIntro":"ਇਹ ਸਕ੍ਰੀਨ ਤੁਹਾਡੇ ਰਜਿਸਟਰਡ ਸਪੀਕਰਾਂ ਨੂੰ ਸੂਚੀਬੱਧ ਕਰਦੀ ਹੈ।",
   "speakerAddIntro":"ਨਵੀਂ ਆਵਾਜ਼ ਰਜਿਸਟਰ ਕਰਨ ਲਈ ਸਪੀਕਰ ਜੋੜੋ 'ਤੇ ਟੈਪ ਕਰੋ।",
-  "friendListIntro":"Browse people and send them a friend request.",
-  "friendAddIntro":"Tap the add icon to connect and start chatting.",
-  "friendBookIntro":"Your approved friends appear here.",
-  "friendChatIntro":"Tap the chat bubble to start a conversation."
+  "friendListIntro":"ਲੋਕਾਂ ਨੂੰ ਬ੍ਰਾਊਜ਼ ਕਰੋ ਅਤੇ ਉਨ੍ਹਾਂ ਨੂੰ ਦੋਸਤੀ ਦੀ ਬੇਨਤੀ ਭੇਜੋ।",
+  "friendAddIntro":"ਜੁੜਨ ਅਤੇ ਚੈਟਿੰਗ ਸ਼ੁਰੂ ਕਰਨ ਲਈ ਐਡ ਆਈਕਨ 'ਤੇ ਟੈਪ ਕਰੋ।",
+  "friendBookIntro":"ਤੁਹਾਡੇ ਮਨਜ਼ੂਰਸ਼ੁਦਾ ਦੋਸਤ ਇੱਥੇ ਦਿਖਾਈ ਦਿੰਦੇ ਹਨ।",
+  "friendChatIntro":"ਗੱਲਬਾਤ ਸ਼ੁਰੂ ਕਰਨ ਲਈ ਚੈਟ ਬੱਬਲ 'ਤੇ ਟੈਪ ਕਰੋ।",
+  "permissionRequiredMic":"ਮਾਈਕ ਦੀ ਇਜਾਜ਼ਤ ਦੀ ਲੋੜ ਹੈ"
+
 }

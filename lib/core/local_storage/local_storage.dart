@@ -1,8 +1,4 @@
-/*
-
-
-
-import 'package:hive_ce_flutter/adapters.dart';
+import 'package:hive_flutter/adapters.dart';
 
 import '../../config/helper.dart';
 
@@ -10,7 +6,6 @@ abstract class HiveConst {
   static const String userData = 'userData';
   static const String authToken = 'authToken';
   static const String isProfileComplete = 'isProfileComplete';
-
 }
 
 abstract class LocalStorage {
@@ -34,13 +29,10 @@ class HiveStorageImp extends LocalStorage {
     required this.userBox,
   });
 
-
   @override
   Future<void> saveToken(String token) async {
     await userBox.put(HiveConst.authToken, token);
-    printLog("==============saveToken==========");
   }
-
 
   @override
   String? getToken() {
@@ -52,11 +44,9 @@ class HiveStorageImp extends LocalStorage {
         userBox: await Hive.openBox(HiveConst.userData),
       );
 
-*/
-/*  @override
+  /*  @override
   Future<bool> saveLoginUser(UserModel userModel) async {
     await userBox.put(HiveConst.userData, userModel.toJson());
-    printLog("==============saveLoginUser==========");
 
     return true;
   }
@@ -67,8 +57,7 @@ class HiveStorageImp extends LocalStorage {
     if (user == null) return null;
     final data = UserModel.fromJson(jsonDecode(jsonEncode(user)));
     return data;
-  }*//*
-
+  }*/
 
   @override
   Future<void> clearAllBox() async {
@@ -76,8 +65,8 @@ class HiveStorageImp extends LocalStorage {
   }
 
   @override
-  Future<void> saveIsProfileComplete(int isComplete)async {
-   await userBox.put(HiveConst.isProfileComplete, isComplete);
+  Future<void> saveIsProfileComplete(int isComplete) async {
+    await userBox.put(HiveConst.isProfileComplete, isComplete);
   }
 
   @override
@@ -85,7 +74,4 @@ class HiveStorageImp extends LocalStorage {
     final isComplete = userBox.get(HiveConst.isProfileComplete);
     return isComplete;
   }
-
-
 }
-*/

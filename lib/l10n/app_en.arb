@@ -93,5 +93,6 @@
   "friendListIntro":"Browse people and send them a friend request.",
   "friendAddIntro":"Tap the add icon to connect and start chatting.",
   "friendBookIntro":"Your approved friends appear here.",
-  "friendChatIntro":"Tap the chat bubble to start a conversation."
+  "friendChatIntro":"Tap the chat bubble to start a conversation.",
+  "permissionRequiredMic":"Mic Permission is Required"
 }

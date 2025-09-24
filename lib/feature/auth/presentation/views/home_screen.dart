@@ -379,7 +379,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       }
     } catch (_) {
-      // ignore errors silently
     }
   }
 
@@ -511,6 +510,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
+      print('ashha ${response.statusCode}');
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final picUrl = (data['user_details']?['profile_picture_url'] as String?) ?? '';
@@ -526,7 +526,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         }
       }
     } catch (_) {
-      // Ignore upload errors for now
     }
   }
 
@@ -2131,7 +2130,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                               !_trialSkip && !_trialExists;*/
                           final bool identifyLocked =
                           false;
-//
                           return GestureDetector(
                             onTap: identifyLocked
                                 ? () {
@@ -2423,7 +2421,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         final borderColor = _isDarkMode
                             ? Colors.blueAccent.withOpacity(0.36)
                             : Color(0xFF80D0C7).withOpacity(0.95);
-                        //final bool locked = btn['lock'] == true;
                         final bool locked =  false;
 
                         return AnimatedOpacity(

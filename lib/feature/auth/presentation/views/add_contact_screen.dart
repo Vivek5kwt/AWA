@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
@@ -32,11 +33,7 @@ class AddContactScreen extends StatefulWidget {
 class _AddContactScreenState extends State<AddContactScreen>
     with TickerProviderStateMixin {
   final List<String> _sentences = [
-    "hello, how are you?",
-    "What are you doing?",
-    "having any plans for today?",
-    "can you please repeat that",
-    "i will call you later."
+    "The quick brown fox jumps over the lazy dog. This voice sample will be used to register your speech profile. Speak naturally and clearly in your normal tone.",
   ];
   int _currentIndex = 0;
   bool _isRecording = false;
@@ -46,6 +43,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   double _amplitude = 1800;
   Timer? _ampTimer;
   Timer? _maxRecordTimer;
+  Timer? _recordTimer;
   double _progress = 0.0;
   final rec.AudioRecorder _recorder = rec.AudioRecorder();
   String? _currentRecordingPath;
@@ -63,9 +61,21 @@ class _AddContactScreenState extends State<AddContactScreen>
   bool _repeatTutorialSeen = false;
   bool _showNameIntro = false;
 
+  bool _registrationLoading = false;
+  String? _registrationTitle;
+  String? _registrationText;
+  String? _registrationError;
+  String? _serverResponseMessage;
+  bool _serverResponseIsError = false;
+  bool _manualStopRequested = false;
+  bool _silenceHintShown = false;
+
   static const int silenceThresholdMs = 700;
   static const int ignoreInitialMs = 300;
-  static const int maxRecordMs = 5000;
+  static const int maxRecordMs = 5000000;
+  DateTime? _recordingStartTime;
+  int _recordSeconds = 0;
+  bool _showTips = false;
 
   @override
   void initState() {
@@ -76,13 +86,13 @@ class _AddContactScreenState extends State<AddContactScreen>
 
     _micPulse = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
-      lowerBound: 0.9,
-      upperBound: 1.1,
+      duration: const Duration(milliseconds: 900),
+      lowerBound: 0.94,
+      upperBound: 1.08,
     )..addStatusListener((s) {
-      if (s == AnimationStatus.completed) _micPulse.reverse();
-      if (s == AnimationStatus.dismissed) _micPulse.forward();
-    });
+        if (s == AnimationStatus.completed) _micPulse.reverse();
+        if (s == AnimationStatus.dismissed) _micPulse.forward();
+      });
     _micPulse.forward();
 
     _checkBurst = AnimationController(
@@ -94,6 +104,15 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     _revealWords();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      () async {
+        await _fetchRegistrationText();
+        if (_nameController!.text.trim().isEmpty) {
+          await _askForContactName();
+        }
+      }();
+    });
   }
 
   Future<void> _loadStoredEmail() async {
@@ -117,29 +136,19 @@ class _AddContactScreenState extends State<AddContactScreen>
       });
     }
     if (!micShown) await prefs.setBool('add_contact_mic_tutorial_shown', true);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (nameShown) {
-        _askForContactName();
-      }
-    });
   }
 
   void _revealWords() {
     final words = _sentences[_currentIndex].split(' ');
-    _wordVisible = List<bool>.filled(words.length, false);
-    for (var i = 0; i < words.length; i++) {
-      Future.delayed(Duration(milliseconds: i * 300), () {
-        if (!mounted) return;
-        setState(() => _wordVisible[i] = true);
-      });
-    }
+    _wordVisible = List<bool>.filled(words.length, true);
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _ampTimer?.cancel();
     _maxRecordTimer?.cancel();
+    _recordTimer?.cancel();
     _recorder.dispose();
     _micPulse.dispose();
     _checkBurst.dispose();
@@ -149,23 +158,38 @@ class _AddContactScreenState extends State<AddContactScreen>
 
   Future<void> _startRecording() async {
     if (!mounted) return;
+
     setState(() {
       _showTryAgain = false;
       _showSuccess = false;
       _progress = 0.0;
       _userStartedSpeaking = false;
       _lastVoiceTime = null;
+      _serverResponseMessage = null;
+      _serverResponseIsError = false;
+      _recordSeconds = 0;
+      _showMicTutorial = false;
+      _showRepeatTutorial = false;
+      _manualStopRequested = false;
+      _silenceHintShown = false;
     });
 
     if (!await _recorder.hasPermission()) {
       if (!mounted) return;
       setState(() => _showTryAgain = true);
+      _showSnackbar(context.loc.permissionRequiredMic, Colors.redAccent);
       return;
     }
 
     final dir = await getTemporaryDirectory();
-    final filePath = '${dir.path}/sentence_${_currentIndex + 1}.m4a';
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final filePath = '${dir.path}/passage_${_currentIndex + 1}_$timestamp.m4a';
     _currentRecordingPath = filePath;
+
+    try {
+      _micPulse.duration = const Duration(milliseconds: 600);
+      _micPulse.forward(from: 0.4);
+    } catch (_) {}
 
     await _recorder.start(
       const rec.RecordConfig(
@@ -177,15 +201,30 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
 
     if (!mounted) return;
-    setState(() => _isRecording = true);
+    setState(() {
+      _isRecording = true;
+      _recordingStartTime = DateTime.now();
+      _recordSeconds = 0;
+    });
+
+    _recordTimer?.cancel();
+    _recordTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        _recordSeconds++;
+      });
+    });
 
     DateTime recordStart = DateTime.now();
-    bool silenceDetected = false;
 
-    _ampTimer = Timer.periodic(const Duration(milliseconds: 70), (_) async {
+    double phase = 0.0;
+    _ampTimer = Timer.periodic(const Duration(milliseconds: 80), (_) async {
       if (!_isRecording) return;
+
+      phase += 0.3;
+      final base = 1700 + 300 * sin(phase) + Random().nextDouble() * 220;
       setState(() {
-        _amplitude = 1800 + Random().nextInt(2200).toDouble();
+        _amplitude = base.clamp(1200, 4200);
       });
 
       double simulatedAmplitude = _amplitude;
@@ -193,25 +232,21 @@ class _AddContactScreenState extends State<AddContactScreen>
       if (simulatedAmplitude > 2000) {
         _userStartedSpeaking = true;
         _lastVoiceTime = DateTime.now();
+        _silenceHintShown = false;
       }
 
-      if (_userStartedSpeaking) {
-        final now = DateTime.now();
-        if (_lastVoiceTime != null &&
-            now.difference(_lastVoiceTime!).inMilliseconds > silenceThresholdMs &&
-            now.difference(recordStart).inMilliseconds > ignoreInitialMs) {
-          silenceDetected = true;
-        }
-      }
-
-      if (silenceDetected) {
-        silenceDetected = false;
-        await _stopRecording();
-      }
     });
+
     _maxRecordTimer = Timer(Duration(milliseconds: maxRecordMs), () async {
       if (_isRecording) {
         await _stopRecording();
+        if (mounted) {
+          setState(() => _showTryAgain = true);
+          _showSnackbar(
+            "Recording stopped automatically (time limit). Please tap mic to record and tap again to stop when done.",
+            Colors.orangeAccent,
+          );
+        }
       }
     });
   }
@@ -221,10 +256,22 @@ class _AddContactScreenState extends State<AddContactScreen>
     setState(() => _isRecording = false);
     _ampTimer?.cancel();
     _maxRecordTimer?.cancel();
+    _recordTimer?.cancel();
     if (await _recorder.isRecording()) {
       await _recorder.stop();
     }
-    await _onRecordingFinished();
+    try {
+      _micPulse.duration = const Duration(milliseconds: 900);
+      _micPulse.forward(from: 0.0);
+    } catch (_) {}
+    if (_manualStopRequested) {
+      await _onRecordingFinished();
+    } else {
+      if (mounted) {
+        setState(() => _showTryAgain = true);
+      }
+    }
+    _manualStopRequested = false;
   }
 
   void _showSnackbar(String message, Color color) {
@@ -241,6 +288,7 @@ class _AddContactScreenState extends State<AddContactScreen>
       ),
     );
   }
+
   Future<void> _askForContactName() async {
     _dialogActive = true;
     final isDark = widget.isDarkMode;
@@ -251,21 +299,20 @@ class _AddContactScreenState extends State<AddContactScreen>
       barrierDismissible: false,
       builder: (dialogContext) {
         return Dialog(
-          backgroundColor: isDark ? Color(0xFF232526) : Colors.white,
+          backgroundColor: isDark ? const Color(0xFF121218) : Colors.white,
           insetPadding: const EdgeInsets.symmetric(horizontal: 32),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
           child: SingleChildScrollView(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 40, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  // Close button with larger tap area
                   Positioned(
-                    top: -16,
-                    right: -16,
+                    top: -14,
+                    right: -14,
                     child: GestureDetector(
                       onTap: () => Navigator.of(dialogContext).pop(),
                       behavior: HitTestBehavior.translucent,
@@ -279,7 +326,7 @@ class _AddContactScreenState extends State<AddContactScreen>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: isDark
-                                ? Colors.redAccent.withOpacity(0.9)
+                                ? Colors.redAccent.withOpacity(0.95)
                                 : Colors.grey.shade300,
                           ),
                           child: Icon(
@@ -292,11 +339,9 @@ class _AddContactScreenState extends State<AddContactScreen>
                     ),
                   ),
 
-                  // Dialog content
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Header icon
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
@@ -306,6 +351,13 @@ class _AddContactScreenState extends State<AddContactScreen>
                                 ? [Colors.cyanAccent, Colors.deepPurpleAccent]
                                 : [Colors.deepPurple, Colors.cyan],
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 8,
+                              offset: const Offset(0, 6),
+                            )
+                          ],
                         ),
                         child: Icon(
                           Icons.contact_page_rounded,
@@ -315,7 +367,6 @@ class _AddContactScreenState extends State<AddContactScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // Title
                       Text(
                         context.loc.registerSpeaker,
                         style: TextStyle(
@@ -326,7 +377,6 @@ class _AddContactScreenState extends State<AddContactScreen>
                       ),
                       const SizedBox(height: 8),
 
-                      // Subtitle
                       Text(
                         context.loc.enterAFriendlyName,
                         style: TextStyle(
@@ -336,9 +386,8 @@ class _AddContactScreenState extends State<AddContactScreen>
                         textAlign: TextAlign.center,
                       ),
 
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 14),
 
-                      // Name TextField (no labelText)
                       TextField(
                         controller: _nameController,
                         autofocus: true,
@@ -350,8 +399,8 @@ class _AddContactScreenState extends State<AddContactScreen>
                           ),
                           filled: true,
                           fillColor: isDark
-                              ? Colors.white.withOpacity(0.1)
-                              : Colors.grey.shade200,
+                              ? Colors.white.withOpacity(0.03)
+                              : Colors.grey.shade100,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
@@ -371,16 +420,16 @@ class _AddContactScreenState extends State<AddContactScreen>
                           }
                         },
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 18),
 
-                      // Save & Continue button themed to app
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           icon: const Icon(Icons.check_circle, size: 20),
-                          label:  Text(context.loc.saveContinue),
+                          label: Text(context.loc.saveContinue),
                           style: ElevatedButton.styleFrom(
-                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                            foregroundColor:
+                                Theme.of(context).colorScheme.onPrimary,
                             backgroundColor: Theme.of(context).primaryColor,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -415,10 +464,13 @@ class _AddContactScreenState extends State<AddContactScreen>
     _dialogActive = false;
 
     if (enteredName == null || enteredName.trim().isEmpty) {
-      _nameController?.dispose();
-      _nameController = null;
       if (mounted) context.pop();
       return;
+    }
+    if (mounted) {
+      setState(() {
+        _nameController?.text = enteredName.trim();
+      });
     }
   }
 
@@ -441,7 +493,9 @@ class _AddContactScreenState extends State<AddContactScreen>
       final isValid = await _isAudioValid(_currentRecordingPath!);
       if (!isValid) {
         setState(() => _showTryAgain = true);
-        _showSnackbar("Voice not clear or too quiet. Please speak clearly.", Colors.redAccent);
+        _showSnackbar(
+            "Voice not clear or too quiet. Please speak clearly.",
+            Colors.redAccent);
         return;
       }
       setState(() => _isUploading = true);
@@ -456,65 +510,89 @@ class _AddContactScreenState extends State<AddContactScreen>
 
   Future<void> _registerSpeakerAPI(String filePath) async {
     try {
-      final uri = Uri.parse(
-        ApiConstants.registerSpeaker.endsWith('/')
-            ? ApiConstants.registerSpeaker
-            : '${ApiConstants.registerSpeaker}/',
-      );
+      final base = ApiConstants.baseUrl;
+      final uri = Uri.parse('$base/api/register-speaker');
       final req = http.MultipartRequest('POST', uri)
-        ..fields['name'] = _nameController!.text
+        ..fields['name'] = _nameController!.text.trim()
         ..fields['sentence_no'] = (_currentIndex + 1).toString()
         ..fields['email'] = _email
-        ..files.add(await http.MultipartFile.fromPath(
-          'audio_file',
-          filePath,
-          contentType: MediaType('audio', 'm4a'),
-        ));
-      final resp = await req.send();
-      await resp.stream.toBytes();
+        ..fields['phone'] = widget.phoneNumber;
+      req.files.add(await http.MultipartFile.fromPath(
+        'audio_file',
+        filePath,
+        contentType: MediaType('audio', 'm4a'),
+      ));
+
+      final streamedResponse = await req.send();
+      final respBytes = await streamedResponse.stream.toBytes();
+      final respString = utf8.decode(respBytes);
       if (!mounted) return;
-      if (resp.statusCode == 200) {
-        setState(() => _showSuccess = true);
+
+      String message;
+      bool success = false;
+      try {
+        final parsed = jsonDecode(respString);
+        if (parsed is Map && parsed.isNotEmpty) {
+          message = (parsed['message'] ??
+                  parsed['detail'] ??
+                  parsed['msg'] ??
+                  parsed['data']?['message'] ??
+                  parsed['status']?.toString() ??
+                  respString)
+              .toString();
+        } else {
+          message = respString;
+        }
+      } catch (_) {
+        message = respString;
+      }
+
+      if (streamedResponse.statusCode == 200 ||
+          streamedResponse.statusCode == 201) {
+        success = true;
+      } else {
+        success = false;
+      }
+
+      if (success) {
+        setState(() {
+          _showSuccess = true;
+          _serverResponseMessage = message.isNotEmpty ? message : "Registered successfully.";
+          _serverResponseIsError = false;
+        });
         _checkBurst.forward(from: 0);
+        _showSnackbar(_serverResponseMessage!, Colors.green);
         await Future.delayed(const Duration(milliseconds: 1200));
         if (!mounted) return;
-        if (_currentIndex < _sentences.length - 1) {
-          setState(() {
-            _currentIndex++;
-            _showSuccess = false;
-            _progress = 0.0;
-            _userStartedSpeaking = false;
-          });
-          _revealWords();
-        } else {
-          _showSnackbar(
-            "${_nameController!.text.trim()} ${context.loc.addedSuccessFully}",
-            Colors.greenAccent,
-          );
-          await Future.delayed(const Duration(milliseconds: 800));
-          if (!mounted) return;
-          context.pop(true);
-        }
+        context.pop(true);
       } else {
-        setState(() => _showTryAgain = true);
+        setState(() {
+          _showTryAgain = true;
+          _serverResponseMessage = message.isNotEmpty ? message : "Server error. Please try again.";
+          _serverResponseIsError = true;
+        });
+        _showSnackbar(_serverResponseMessage!, Colors.redAccent);
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      setState(() => _showTryAgain = true);
-      _showSnackbar("Network error. Please try again.", Colors.redAccent);
+      setState(() {
+        _showTryAgain = true;
+        _serverResponseMessage = "Network error. Please try again.";
+        _serverResponseIsError = true;
+      });
+      _showSnackbar(_serverResponseMessage!, Colors.redAccent);
     }
   }
 
   void _onMicTap() {
-    if (!_repeatTutorialSeen) {
-      setState(() => _showRepeatTutorial = true);
-      _repeatTutorialSeen = true;
-      SharedPreferences.getInstance().then((p) => p.setBool('add_contact_repeat_tutorial_shown', true));
-      return;
-    }
     if (_isRecording) {
+      _manualStopRequested = true;
       _stopRecording();
     } else {
+      setState(() {
+        _showMicTutorial = false;
+        _showRepeatTutorial = false;
+      });
       _startRecording();
     }
   }
@@ -531,13 +609,19 @@ class _AddContactScreenState extends State<AddContactScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 110,
-                  height: 110,
-                  decoration: const BoxDecoration(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white24,
+                    gradient: const RadialGradient(
+                      colors: [Colors.white24, Colors.transparent],
+                      center: Alignment.center,
+                    ),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black45, blurRadius: 18, offset: Offset(0, 8))
+                    ],
                   ),
-                  child: const Icon(Icons.mic, color: Colors.white, size: 60),
+                  child: const Icon(Icons.mic, color: Colors.white, size: 64),
                 ),
                 const SizedBox(height: 20),
                 Padding(
@@ -558,12 +642,22 @@ class _AddContactScreenState extends State<AddContactScreen>
                   child: Text(
                     context.loc.tapMicToRecord,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withOpacity(0.95),
                       fontSize: 16,
                     ),
                     textAlign: TextAlign.center,
                   ),
                 ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  onPressed: () => setState(() => _showMicTutorial = false),
+                  child: Text(/*context.loc.gotIt ??*/ 'Got it'),
+                  style: ElevatedButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    backgroundColor: Colors.deepPurpleAccent,
+                  ),
+                )
               ],
             ),
           ),
@@ -594,8 +688,18 @@ class _AddContactScreenState extends State<AddContactScreen>
                 const SizedBox(height: 10),
                 Text(
                   context.loc.tapMicToRecord,
-                  style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15),
+                  style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 15),
                   textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 14),
+                ElevatedButton(
+                  onPressed: () => setState(() => _showRepeatTutorial = false),
+                  child: Text(/*context.loc.gotIt ?? */'Got it'),
+                  style: ElevatedButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    backgroundColor: Colors.deepPurpleAccent,
+                  ),
                 ),
               ],
             ),
@@ -610,7 +714,6 @@ class _AddContactScreenState extends State<AddContactScreen>
     await prefs.setBool('add_contact_name_intro_shown', true);
     if (!mounted) return;
     setState(() => _showNameIntro = false);
-    _askForContactName();
   }
 
   Widget _buildNameIntroOverlay(BuildContext context) {
@@ -640,10 +743,20 @@ class _AddContactScreenState extends State<AddContactScreen>
                 Text(
                   context.loc.nameFieldIntro,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withOpacity(0.95),
                     fontSize: 15,
                   ),
                   textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  onPressed: _hideNameIntro,
+                  child: Text(/*context.loc.gotIt ??*/ 'Got it'),
+                  style: ElevatedButton.styleFrom(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    backgroundColor: Colors.deepPurpleAccent,
+                  ),
                 ),
               ],
             ),
@@ -653,23 +766,414 @@ class _AddContactScreenState extends State<AddContactScreen>
     );
   }
 
+  Widget _buildMicButton(double size) {
+    final gradientColors = _isRecording
+        ? [Colors.redAccent.shade400, Colors.deepOrangeAccent.shade200]
+        : (widget.isDarkMode
+            ? [const Color(0xFF7B61FF), const Color(0xFF00E5FF)]
+            : [const Color(0xFF6A4DFF), const Color(0xFF00E5FF)]);
+    return ScaleTransition(
+      scale: _micPulse,
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: _onMicTap,
+          customBorder: const CircleBorder(),
+          splashFactory: InkRipple.splashFactory,
+          child: Ink(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(colors: gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
+              boxShadow: [
+                BoxShadow(color: Colors.black45, blurRadius: 18, offset: const Offset(0, 10)),
+                if (_isRecording)
+                  BoxShadow(
+                    color: Colors.redAccent.withOpacity(0.32),
+                    blurRadius: 48,
+                    spreadRadius: 8,
+                  ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 500),
+                  width: size * (_isRecording ? 0.82 : 0.76),
+                  height: size * (_isRecording ? 0.82 : 0.76),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(_isRecording ? 0.06 : 0.08),
+                  ),
+                ),
+                Center(
+                  child: Icon(
+                    _isRecording ? Icons.stop_circle : Icons.mic,
+                    color: Colors.white,
+                    size: size * 0.46,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  Future<void> _fetchRegistrationText() async {
+    if (!mounted) return;
+    setState(() {
+      _registrationLoading = true;
+      _registrationError = null;
+    });
+
+    try {
+      Uri uri;
+      try {
+        final endpoint = ApiConstants.getRegistration;
+        uri = Uri.parse(endpoint);
+      } catch (_) {
+        final base = ApiConstants.baseUrl;
+        uri = Uri.parse('$base/api/registration-text');
+      }
+
+      final response = await http.get(uri);
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        final body = response.body.trim();
+        try {
+          final parsed = body.startsWith('{') ? jsonDecode(body) : null;
+          if (parsed is Map && parsed.isNotEmpty) {
+            final title = (parsed['title'] ?? parsed['instructions'] ?? parsed['name'])?.toString();
+            final text = (parsed['text'] ?? parsed['registration_text'] ?? parsed['body'])?.toString();
+            setState(() {
+              _registrationTitle = (title != null && title.isNotEmpty) ? title : null;
+              _registrationText = (text != null && text.isNotEmpty) ? text : body;
+            });
+          } else {
+            setState(() {
+              _registrationTitle = null;
+              _registrationText = body;
+            });
+          }
+        } catch (_) {
+          setState(() {
+            _registrationTitle = null;
+            _registrationText = body;
+          });
+        }
+      } else {
+        setState(() {
+          _registrationError = 'Failed to load instructions';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _registrationError = 'Network error while fetching instructions';
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() => _registrationLoading = false);
+    }
+  }
+
+  String _formatDuration(int seconds) {
+    final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+    final ss = (seconds % 60).toString().padLeft(2, '0');
+    return '$mm:$ss';
+  }
+
+  Widget _buildInstructionPanel(double width) {
+    final theme = Theme.of(context);
+    final primaryGradient = widget.isDarkMode
+        ? const LinearGradient(colors: [Color(0xFF6A4DFF), Color(0xFF00E5FF)])
+        : const LinearGradient(colors: [Color(0xFF8E2DE2), Color(0xFF4A00E0)]);
+    final accent = widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent;
+
+    return Column(
+      children: [
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 420),
+          width: width,
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          decoration: BoxDecoration(
+            gradient: widget.isDarkMode
+                ? LinearGradient(colors: [Colors.white.withOpacity(0.02), Colors.white.withOpacity(0.01)])
+                : LinearGradient(colors: [Colors.white.withOpacity(0.04), Colors.white.withOpacity(0.02)]),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withOpacity(0.04)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 10,
+                offset: const Offset(0, 6),
+              )
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: _isRecording
+                      ? const LinearGradient(colors: [Colors.redAccent, Colors.deepOrangeAccent])
+                      : primaryGradient,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.18),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 420),
+                    transitionBuilder: (child, anim) {
+                      return ScaleTransition(scale: anim, child: RotationTransition(turns: anim, child: child));
+                    },
+                    child: _isRecording
+                        ? const Icon(Icons.mic, key: ValueKey('mic'), color: Colors.white, size: 28)
+                        : const Icon(Icons.lightbulb, key: ValueKey('bulb'), color: Colors.white, size: 28),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isRecording ? context.loc.recordingSpeakClearly : "Ready to capture your voice",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.98),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _isRecording
+                          ? "Recording... Speak clearly and naturally. Tap mic to stop and submit."
+                          : "Tap the mic and read the passage above in a natural tone. Keep device close and avoid background noise.",
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.82),
+                        fontSize: 13.6,
+                        height: 1.28,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => setState(() => _showTips = !_showTips),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _showTips ? Icons.expand_less : Icons.lightbulb_outlined,
+                            color: accent.withOpacity(0.95),
+                            size: 16,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _showTips ? "Hide tips" : "Quick tips",
+                            style: TextStyle(
+                              color: accent.withOpacity(0.95),
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        AnimatedCrossFade(
+          firstChild: const SizedBox.shrink(),
+          secondChild: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Container(
+              width: width,
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              decoration: BoxDecoration(
+                color: widget.isDarkMode ? Colors.white.withOpacity(0.02) : Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.04)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _TipChip(
+                        icon: Icons.volume_up,
+                        label: "Speak at a normal volume",
+                        isDark: widget.isDarkMode,
+                      ),
+                      _TipChip(
+                        icon: Icons.phone_android,
+                        label: "Hold phone ~20–30 cm from your mouth",
+                        isDark: widget.isDarkMode,
+                      ),
+                      _TipChip(
+                        icon: Icons.noise_control_off,
+                        label: "Avoid background noise",
+                        isDark: widget.isDarkMode,
+                      ),
+                      _TipChip(
+                        icon: Icons.repeat,
+                        label: "If unsure, re-record",
+                        isDark: widget.isDarkMode,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          crossFadeState: _showTips ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 320),
+        ),
+
+        const SizedBox(height: 12),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 360),
+          child: _showTryAgain
+              ? Container(
+                  key: const ValueKey('tryAgainCard'),
+                  width: width,
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.48),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.redAccent.withOpacity(0.12)),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black26, blurRadius: 10, offset: const Offset(0, 6))
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.redAccent.withOpacity(0.18),
+                            ),
+                            child: const Center(child: Icon(Icons.error_outline, color: Colors.redAccent)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  context.loc.voiceNotClear,
+                                  style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 15),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  _serverResponseMessage ??
+                                      "Voice unclear or too quiet. Try again keeping steady distance and speak clearly.",
+                                  style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13.2),
+                                ),
+                              ],
+                            ),
+                          )
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  _showTryAgain = false;
+                                  _showSuccess = false;
+                                });
+                                _startRecording();
+                              },
+                              icon: const Icon(Icons.replay),
+                              label: Text(/*context.loc.tryAgain ??*/ 'Try again'),
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                backgroundColor: Colors.deepPurpleAccent,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                textStyle: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                setState(() => _showTryAgain = false);
+                              },
+                              child: Text(/*context.loc.dismiss ?? */'Dismiss'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: BorderSide(color: Colors.white.withOpacity(0.08)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final words = _sentences[_currentIndex].split(' ');
     final size = MediaQuery.of(context).size;
     final gradientColors = widget.isDarkMode
-        ? [const Color(0xFF181A20), const Color(0xFF232526), const Color(0xFF181A20)]
-        : [const Color(0xFF0093E9), const Color(0xFF80D0C7), const Color(0xFFFCF6BA)];
+        ? [const Color(0xFF0F1724), const Color(0xFF0F1020), const Color(0xFF071229)]
+        : [const Color(0xFF56CCF2), const Color(0x2F80ED), const Color(0xFFFFD3A5)];
 
     final containerColor = widget.isDarkMode
-        ? Colors.white.withOpacity(0.09)
-        : Colors.white.withOpacity(0.13);
+        ? Colors.white.withOpacity(0.04)
+        : Colors.white.withOpacity(0.14);
     final borderColor = widget.isDarkMode
-        ? Colors.blueGrey.shade700.withOpacity(0.28)
-        : Colors.pinkAccent.withOpacity(0.8);
+        ? Colors.blueGrey.shade700.withOpacity(0.18)
+        : Colors.pinkAccent.withOpacity(0.18);
     final progressBarBg = widget.isDarkMode
-        ? Colors.blueGrey.shade900.withOpacity(0.14)
-        : Colors.purple.shade200.withOpacity(0.16);
+        ? Colors.blueGrey.shade900.withOpacity(0.12)
+        : Colors.purple.shade200.withOpacity(0.10);
+
+    final middleBlobHeight = max(260.0, size.height * 0.36);
+
+    final topInstruction = _registrationTitle ?? "Voice Registration";
+    final topSubtitle = _registrationTitle == null
+        ? "Tap the mic and read the passage below in a natural tone."
+        : null;
+
+    final passageText = _registrationText ?? _sentences[_currentIndex];
+
+    final micSize = min(150.0, size.width * 0.34);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -682,7 +1186,7 @@ class _AddContactScreenState extends State<AddContactScreen>
           padding: const EdgeInsets.only(left: 10),
           child: CircleAvatar(
             backgroundColor: widget.isDarkMode
-                ? Colors.white.withOpacity(0.09)
+                ? Colors.white.withOpacity(0.04)
                 : Colors.blue.shade50.withOpacity(0.9),
             child: IconButton(
               icon: Icon(Icons.arrow_back,
@@ -698,6 +1202,28 @@ class _AddContactScreenState extends State<AddContactScreen>
             ),
           ),
         ),
+        actions: [
+          IconButton(
+            tooltip: /*context.loc.editName ?? */'Edit name',
+            icon: Icon(Icons.edit, color: widget.isDarkMode ? Colors.white70 : Colors.black87),
+            onPressed: () {
+              _askForContactName();
+            },
+          ),
+          if (widget.phoneNumber.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 12.0),
+              child: Center(
+                child: Text(
+                  widget.phoneNumber,
+                  style: TextStyle(
+                    color: widget.isDarkMode ? Colors.white70 : Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
       body: Container(
         width: double.infinity,
@@ -706,232 +1232,468 @@ class _AddContactScreenState extends State<AddContactScreen>
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: gradientColors,
-            stops: const [0.1, 0.7, 1.0],
+            colors: widget.isDarkMode
+                ? [const Color(0xFF0F1724), const Color(0xFF071229)]
+                : [const Color(0xFF56CCF2), const Color(0xFF2F80ED), const Color(0xFFFFD3A5)],
+            stops: const [0.0, 0.6, 1.0],
           ),
         ),
         child: Stack(
           children: [
             SafeArea(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 16),
-                  _ProgressDots(
-                    current: _currentIndex,
-                    total: _sentences.length,
-                    isDarkMode: widget.isDarkMode,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    "${context.loc.youAreOnQuestion} ${_currentIndex + 1} ${context.loc.of_text} ${_sentences.length}",
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.88),
-                      fontWeight: FontWeight.w500,
-                      fontSize: 18,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    width: size.width * 0.93,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: containerColor,
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      _sentences[_currentIndex],
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 22,
-                        letterSpacing: 0.2,
-                        shadows: [Shadow(color: Colors.black12, blurRadius: 5)],
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(height: 6),
+                      _ProgressDots(
+                        current: _currentIndex,
+                        total: _sentences.length,
+                        isDarkMode: widget.isDarkMode,
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Center(
-                      child: Stack(
-                        alignment: Alignment.center,
+                      const SizedBox(height: 10),
+
+                      Column(
                         children: [
-                          AnimatedOpacity(
-                            opacity: _isRecording ? 1 : 0.19,
-                            duration: const Duration(milliseconds: 200),
-                            child: SizedBox(
-                              width: size.width * 0.6,
-                              height: size.width * 0.6,
-                              child: WaveBlob(
-                                amplitude: _isRecording ? _amplitude : 1800,
-                                autoScale: true,
-                                blobCount: 2,
-                                scale: 1.0,
-                                centerCircle: true,
-                                overCircle: true,
-                                circleColors: widget.isDarkMode
-                                    ? [const Color(0xFF5CE1E6), const Color(0xFF1F1C2C)]
-                                    : [const Color(0xFF30DCFF), const Color(0xFF6C7BFF)],
-                                child: const SizedBox.shrink(),
-                              ),
-                            ),
-                          ),
-                          _showSuccess
-                              ? ScaleTransition(
-                            scale: _burstScale,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.verified_rounded,
-                                    color: Colors.greenAccent.shade400,
-                                    size: 90),
-                                const SizedBox(height: 8),
-                                ShaderMask(
-                                  shaderCallback: (Rect bounds) {
-                                    return const LinearGradient(
-                                      colors: [
-                                        Colors.greenAccent,
-                                        Colors.white,
-                                        Colors.greenAccent
-                                      ],
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                    ).createShader(bounds);
-                                  },
-                                  child:  Text(
-                                    context.loc.voiceMatched,
-                                    style: TextStyle(
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white),
-                                  ),
-                                ),
+                          Text(
+                            topInstruction,
+                            style: TextStyle(
+                              color: Colors.white.withOpacity(0.98),
+                              fontWeight: FontWeight.w900,
+                              fontSize: 28,
+                              letterSpacing: 0.6,
+                              shadows: const [
+                                Shadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2))
                               ],
                             ),
-                          )
-                              : ScaleTransition(
-                            scale: _micPulse,
-                            child: GestureDetector(
-                              onTap: _onMicTap,
-                              child: Container(
-                                width: 100,
-                                height: 100,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: LinearGradient(
-                                    colors: _isRecording
-                                        ? [Colors.redAccent, Colors.deepOrange]
-                                        : [
-                                      widget.isDarkMode
-                                          ? Colors.white10
-                                          : Colors.white24,
-                                      widget.isDarkMode
-                                          ? Colors.white24
-                                          : Colors.white38
-                                    ],
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                        color: Colors.black45, blurRadius: 8),
-                                    if (_isRecording)
-                                      BoxShadow(
-                                        color: Colors.redAccent.withOpacity(0.5),
-                                        blurRadius: 20,
-                                        spreadRadius: 5,
-                                      ),
-                                  ],
-                                ),
-                                child: Icon(
-                                  _isRecording ? Icons.stop : Icons.mic,
-                                  color: Colors.white,
-                                  size: 40,
-                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 8),
+                          if (_nameController != null && _nameController!.text.trim().isNotEmpty)
+                            Text(
+                              "Speaker: ${_nameController!.text.trim()}",
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.92),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
+                          if (topSubtitle != null) const SizedBox(height: 6),
+                          if (topSubtitle != null)
+                            Text(
+                              topSubtitle!,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.95),
+                                fontSize: 15.0,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 420),
+                        child: Container(
+                          key: ValueKey(passageText),
+                          width: size.width * 0.94,
+                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
+                          decoration: BoxDecoration(
+                            gradient: widget.isDarkMode
+                                ? LinearGradient(
+                                    colors: [Colors.white.withOpacity(0.03), Colors.white.withOpacity(0.02)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  )
+                                : LinearGradient(
+                                    colors: [Colors.white.withOpacity(0.18), Colors.white.withOpacity(0.06)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black26,
+                                blurRadius: 12,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          alignment: Alignment.center,
+                          child: _registrationLoading
+                              ? Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const SizedBox(height: 6),
+                                    const CircularProgressIndicator(color: Colors.white70),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'Loading...',
+                                      style: const TextStyle(color: Colors.white70),
+                                    ),
+                                    const SizedBox(height: 6),
+                                  ],
+                                )
+                              : _registrationError != null
+                                  ? Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Instructions unavailable',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 16,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          _registrationError!,
+                                          style: const TextStyle(
+                                            color: Colors.redAccent,
+                                            fontSize: 13,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ],
+                                    )
+                                  : Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(10),
+                                          margin: const EdgeInsets.only(right: 12, top: 2),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: LinearGradient(
+                                              colors: widget.isDarkMode
+                                                  ? [Colors.cyanAccent, Colors.deepPurpleAccent]
+                                                  : [Colors.deepPurple, Colors.cyan],
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black26,
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 3),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Icon(
+                                            Icons.text_snippet_rounded,
+                                            size: 22,
+                                            color: widget.isDarkMode ? Colors.black87 : Colors.white,
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            passageText,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 17,
+                                              letterSpacing: 0.1,
+                                              height: 1.45,
+                                              shadows: [Shadow(color: Colors.black12, blurRadius: 4)],
+                                            ),
+                                            textAlign: TextAlign.left,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      SizedBox(
+                        height: middleBlobHeight,
+                        child: Center(
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              AnimatedOpacity(
+                                opacity: _isRecording ? 1 : 0.40,
+                                duration: const Duration(milliseconds: 240),
+                                child: SizedBox(
+                                  width: min(size.width * 0.78, 520),
+                                  height: min(size.width * 0.78, 520),
+                                  child: WaveBlob(
+                                    amplitude: _isRecording ? _amplitude : 1500,
+                                    autoScale: true,
+                                    blobCount: 3,
+                                    scale: 1.06,
+                                    centerCircle: true,
+                                    overCircle: true,
+                                    circleColors: widget.isDarkMode
+                                        ? [const Color(0xFF5CE1E6), const Color(0xFF1F1C2C)]
+                                        : [const Color(0xFF50D3FF), const Color(0xFF9B65FF)],
+                                    child: const SizedBox.shrink(),
+                                  ),
+                                ),
+                              ),
+
+                              if (_showSuccess)
+                                ScaleTransition(
+                                  scale: _burstScale,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.verified_rounded,
+                                          color: Colors.greenAccent.shade400,
+                                          size: 110),
+                                      const SizedBox(height: 8),
+                                      ShaderMask(
+                                        shaderCallback: (Rect bounds) {
+                                          return const LinearGradient(
+                                            colors: [
+                                              Colors.greenAccent,
+                                              Colors.white,
+                                              Colors.greenAccent
+                                            ],
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                          ).createShader(bounds);
+                                        },
+                                        child: Text(
+                                          context.loc.voiceMatched,
+                                          style: const TextStyle(
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    _buildMicButton(micSize),
+                                    const SizedBox(height: 12),
+                                    AnimatedOpacity(
+                                      duration: const Duration(milliseconds: 300),
+                                      opacity: _isRecording ? 1 : 0.95,
+                                      child: Text(
+                                        _isRecording ? context.loc.recordingSpeakClearly : context.loc.tapMicToRecord,
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.94),
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16.5,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    if (_isRecording)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black45,
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.timer, color: Colors.white70, size: 16),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              _formatDuration(_recordSeconds),
+                                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            GestureDetector(
+                                              onTap: () {
+                                                _manualStopRequested = true;
+                                                _stopRecording();
+                                              },
+                                              child: Row(
+                                                children: const [
+                                                  Icon(Icons.stop_circle, color: Colors.redAccent, size: 18),
+                                                  SizedBox(width: 6),
+                                                  Text('Stop', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700)),
+                                                ],
+                                              ),
+                                            )
+                                          ],
+                                        ),
+                                      )
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: LinearProgressIndicator(
+                            value: _isRecording ? null : 1.0,
+                            minHeight: 9.5,
+                            backgroundColor: progressBarBg,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              widget.isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent,
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      if (_serverResponseMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 18.0, vertical: 8),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: _serverResponseIsError ? Colors.redAccent.withOpacity(0.12) : Colors.greenAccent.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _serverResponseIsError ? Colors.redAccent.withOpacity(0.65) : Colors.greenAccent.withOpacity(0.65),
+                                width: 1.0,
+                              ),
+                            ),
+                            child: Text(
+                              _serverResponseMessage!,
+                              style: TextStyle(
+                                color: _serverResponseIsError ? Colors.redAccent.shade200 : Colors.green.shade900,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 6),
+
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                        child: _buildInstructionPanel(size.width * 0.92),
+                      ),
+
+                      if (_isUploading)
+                        const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: CircularProgressIndicator(color: Colors.purpleAccent),
+                        ),
+
+                      const SizedBox(height: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            if (_showNameIntro) _buildNameIntroOverlay(context),
+            if (_showRepeatTutorial) _buildRepeatTutorialOverlay(context),
+            if (_showMicTutorial) _buildTutorialOverlay(context),
+
+            if (_isRecording)
+              Positioned(
+                bottom: 110,
+                left: 24,
+                right: 24,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black87.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white24),
+                      boxShadow: [
+                        BoxShadow(color: Colors.black45, blurRadius: 10, offset: const Offset(0, 6))
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.mic, color: Colors.redAccent, size: 20),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Recording started",
+                                style: TextStyle(color: Colors.white.withOpacity(0.96), fontWeight: FontWeight.w800),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Please read the passage aloud. Tap mic to stop.",
+                                style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                softWrap: true,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            _formatDuration(_recordSeconds),
+                            style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                          ),
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+            if (_registrationLoading)
+              Positioned.fill(
+                child: IgnorePointer(
+                  ignoring: true,
+                  child: Container(
+                    color: Colors.black87.withOpacity(0.25),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2.4,
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            'Loading instructions...',
+                            style: const TextStyle(color: Colors.white70),
                           ),
                         ],
                       ),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    child: LinearProgressIndicator(
-                      value: _isRecording ? null : (_currentIndex + 1) / _sentences.length,
-                      minHeight: 6.5,
-                      backgroundColor: progressBarBg,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        widget.isDarkMode ? Colors.cyanAccent : Colors.pinkAccent,
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                  ),
-                  Container(
-                    width: size.width * 0.90,
-                    padding: const EdgeInsets.symmetric(vertical: 15),
-                    margin: const EdgeInsets.only(bottom: 3),
-                    decoration: BoxDecoration(
-                      color: containerColor,
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(
-                        color: borderColor,
-                        width: 2,
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Wrap(
-                      alignment: WrapAlignment.center,
-                      children: List.generate(words.length, (i) {
-                        return AnimatedOpacity(
-                          duration: const Duration(milliseconds: 300),
-                          opacity: _wordVisible[i] ? 1 : 0,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Text(
-                              words[i],
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-                  Padding(
-                      padding: const EdgeInsets.only(bottom: 14, top: 8),
-                      child:Text(
-                        _isRecording
-                            ? context.loc.recordingSpeakClearly
-                            : context.loc.tapMicToRecord,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.83),
-                          fontSize: 16,
-                        ),
-                      )
-
-                  ),
-                  if (_showTryAgain)
-                    Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text(
-                        context.loc.voiceNotClear,
-                        style: TextStyle(color: Colors.redAccent),
-                      ),
-                    ),
-                  if (_isUploading)
-                    const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: CircularProgressIndicator(color: Colors.purpleAccent),
-                    ),
-                ],
+                ),
               ),
-            ),
-            if (_showNameIntro) _buildNameIntroOverlay(context),
-            if (_showRepeatTutorial) _buildRepeatTutorialOverlay(context),
-            if (_showMicTutorial) _buildTutorialOverlay(context),
           ],
         ),
       ),
@@ -958,28 +1720,77 @@ class _ProgressDots extends StatelessWidget {
         return AnimatedContainer(
           duration: const Duration(milliseconds: 320),
           margin: const EdgeInsets.symmetric(horizontal: 7),
-          width: selected ? 34 : 13,
-          height: selected ? 34 : 13,
+          width: selected ? 40 : 12,
+          height: selected ? 40 : 12,
           decoration: BoxDecoration(
+            gradient: selected
+                ? LinearGradient(
+                    colors: isDarkMode
+                        ? [Colors.cyanAccent, Colors.deepPurpleAccent]
+                        : [Colors.deepPurpleAccent, Colors.pinkAccent],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight)
+                : null,
             color: selected
-                ? (isDarkMode ? Colors.cyanAccent : Colors.deepPurpleAccent)
+                ? null
                 : (isDarkMode
-                ? Colors.blueGrey.shade800
-                : Colors.deepPurple.shade200),
-            borderRadius: BorderRadius.circular(18),
+                    ? Colors.blueGrey.shade800
+                    : Colors.deepPurple.shade100),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: Colors.black26,
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    )
+                  ]
+                : null,
           ),
           alignment: Alignment.center,
           child: selected
-              ? Text(
-            "Q${i + 1}",
-            style: TextStyle(
-                color: isDarkMode ? Colors.black : Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 13),
-          )
+              ? Icon(
+                  Icons.mic,
+                  size: 16,
+                  color: isDarkMode ? Colors.black : Colors.white,
+                )
               : null,
         );
       }),
+    );
+  }
+}
+
+class _TipChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  const _TipChip({
+    required this.icon,
+    required this.label,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.03) : Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withOpacity(0.02)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.white70),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          )
+        ],
+      ),
     );
   }
 }

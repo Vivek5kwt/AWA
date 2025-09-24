@@ -1,4 +1,3 @@
-
 {
   "@@locale": "hi",
   "helloWorld": "नमस्ते",
@@ -87,12 +86,13 @@
   "other":"अन्य",
   "trialExpired":"परीक्षण समाप्त",
   "hindi":"हिंदी",
-  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
-  "repeatSentenceHint":"બધા પ્રશ્નો પૂર્ણ કરવા માટે પ્રદર્શિત વાક્યનું પુનરાવર્તન કરો.",
-  "speakerListIntro":"આ સ્ક્રીન તમારા નોંધાયેલા સ્પીકર્સની યાદી આપે છે.",
-  "speakerAddIntro":"નવો અવાજ નોંધાવવા માટે સ્પીકર ઉમેરો પર ટેપ કરો.",
-  "friendListIntro":"Browse people and send them a friend request.",
-  "friendAddIntro":"Tap the add icon to connect and start chatting.",
-  "friendBookIntro":"Your approved friends appear here.",
-  "friendChatIntro":"Tap the chat bubble to start a conversation."
+  "nameFieldIntro":"वक्ता की आवाज़ को आसानी से पहचानने के लिए उसका नाम जोड़ें।",
+  "repeatSentenceHint":"सभी प्रश्नों को पूरा करने के लिए प्रदर्शित वाक्य को दोहराएँ।",
+  "speakerListIntro":"यह स्क्रीन आपके पंजीकृत वक्ताओं की सूची दिखाती है।.",
+  "speakerAddIntro":"नई आवाज़ पंजीकृत करने के लिए स्पीकर जोड़ें पर टैप करें.",
+  "friendListIntro":"लोगों को ब्राउज़ करें और उन्हें मित्रता का अनुरोध भेजें।",
+  "friendAddIntro":"कनेक्ट करने और चैटिंग शुरू करने के लिए ऐड आइकन पर टैप करें।",
+  "friendBookIntro":"आपके स्वीकृत मित्र यहां दिखाई देंगे.",
+  "friendChatIntro":"बातचीत शुरू करने के लिए चैट बबल पर टैप करें।",
+  "permissionRequiredMic":"माइक की अनुमति आवश्यक है"
 }

@@ -12,6 +12,7 @@ import 'core/utils/routing/routes_generator.dart';
 import 'dart:async';
 
 import 'l10n/app_localizations.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -60,7 +61,6 @@ class MyApp extends StatefulWidget {
   @override
   State<MyApp> createState() => _MyAppState();
 
-  /// Call this anywhere with: MyApp.setLocale(context, Locale('hi'));
   static void setLocale(BuildContext context, Locale newLocale) {
     final _MyAppState? state = context.findAncestorStateOfType<_MyAppState>();
     state?.setLocale(newLocale);
@@ -77,12 +77,10 @@ class _MyAppState extends State<MyApp> {
     _locale = widget.initialLocale;
     _connectivitySubscription =
         Connectivity().onConnectivityChanged.listen((result) {
-      if (result == ConnectivityResult.none) {
-        toast(
-            msg: "Please check your Internet Connection",
-            isError: true);
-      }
-    });
+          if (result == ConnectivityResult.none) {
+            toast(msg: "Please check your Internet Connection", isError: true);
+          }
+        });
   }
 
   void setLocale(Locale locale) async {
@@ -110,7 +108,6 @@ class _MyAppState extends State<MyApp> {
           Locale('bn'),
           Locale('ur'),
         ],
-
         localizationsDelegates: const [
           AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,

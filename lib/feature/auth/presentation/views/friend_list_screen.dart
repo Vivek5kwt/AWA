@@ -195,7 +195,6 @@ class _FriendListScreenState extends State<FriendListScreen>
       final uri = Uri.parse('${ApiConstants.listUsers}?email=$queryEmail');
       final resp = await http.post(uri);
 
-      // ==== CORRECTED STATUS CODE LOGIC ====
       if (resp.statusCode == 204) {
         await Future.delayed(const Duration(milliseconds: 600));
         if (mounted) showAccountDeletedDialog();
@@ -217,7 +216,6 @@ class _FriendListScreenState extends State<FriendListScreen>
       } else {
         setState(() => _error = 'Load failed: ${resp.statusCode}');
       }
-      // =======================================
     } catch (e) {
       setState(() => _error = 'Error: $e');
     } finally {
@@ -317,7 +315,6 @@ class _FriendListScreenState extends State<FriendListScreen>
       debugPrint('Friend notification error: $e');
     }
   }
-  // Show bottom sheet with user info
   void _showUserProfileSheet(User u, List<Color> avatarColors) {
 
     showModalBottomSheet(
@@ -623,7 +620,6 @@ class _UserProfileSheetState extends State<_UserProfileSheet> {
   @override
   Widget build(BuildContext context) {
     final u = widget.user;
-    // Mock info for 'more' section
     final bio =
         "Hey, I'm ${u.name.split(' ').first}";
     final hobbies = ["Travel", "Sports", "Reading", "Coding", "Art"];

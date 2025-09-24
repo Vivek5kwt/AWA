@@ -62,10 +62,8 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
 
   Stream<List<ChatMessage>> get _chatStream {
     if (_userMsgsCol == null || _adminMsgsCol == null) {
-      // No stream if not initialized
       return const Stream<List<ChatMessage>>.empty();
     }
-    // Combine both user and admin message streams for real-time experience!
     return Rx.combineLatest2<QuerySnapshot, QuerySnapshot, List<ChatMessage>>(
       _userMsgsCol!.orderBy('timestamp').snapshots(),
       _adminMsgsCol!.orderBy('timestamp').snapshots(),
@@ -96,7 +94,6 @@ class _ContactSupportScreenState extends State<ContactSupportScreen> {
       'sender': 'user',
       'timestamp': FieldValue.serverTimestamp(),
     });
-    // Smooth scroll to bottom when message sent
     Future.delayed(const Duration(milliseconds: 200), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -296,7 +293,6 @@ class _SupportChatBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!isUser) {
-      // Admin reply with header & gradient bubble
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
         child: Column(
@@ -360,7 +356,6 @@ class _SupportChatBubble extends StatelessWidget {
       );
     }
 
-    // User bubble
     final bubbleColor = isDarkMode
         ? Colors.tealAccent.withOpacity(0.8)
         : Colors.blueAccent;

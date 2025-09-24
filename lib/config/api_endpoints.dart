@@ -1,17 +1,17 @@
-
 part of '../core/network/http_service.dart';
 abstract final class ApiConstants {
   //live
   //static const String baseUrl = "http://172.232.104.30:5000";
+  static const String streamUrl = "ws://192.168.1.31:8001/ws/transcribe?email=vivek5kwt@gmail.com";
   //local
-  static const String baseUrl = "http://192.168.1.31:5000";
+  static const String baseUrl = "http://192.168.1.31:8001";
   static const String googleApiKey = 'AIzaSyBtUTh-qBSF35PlyBIJVJz9SU8mj2Jn1Hw';
   static const String googleProjectId = 'awa-dev-501dc';
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register_user";
   static const String loginUser = "${_apiBaseUrl}login_user";
   static const String socialLogin = "${_apiBaseUrl}login_user";
-  static const String registerSpeaker = "${_apiBaseUrl}register_speaker";
+  //static const String registerSpeaker = "${_apiBaseUrl}register_speaker";
   static const String listSpeaker = "${_apiBaseUrl}list_speakers?email=";
   static const String listUsers = "${_apiBaseUrl}list_users";
   static const String listFriends = "${_apiBaseUrl}list_friends";
@@ -19,7 +19,8 @@ abstract final class ApiConstants {
   static const String logoutUser = "${_apiBaseUrl}logout_user";
   static const String addFriend = "${_apiBaseUrl}add_friend";
   static const String deleteFriends = "${_apiBaseUrl}delete_friend";
-  static const String deleteSpeaker = "${_apiBaseUrl}delete_speaker";
+  //static const String deleteSpeaker = "${_apiBaseUrl}delete_speaker";
+  static const String deleteSpeaker = "${_apiBaseUrl}api/speakers/";
   static const String identifySpeaker = "${_apiBaseUrl}identify_speaker";
   static const String identifySpeakerNative =
       "${_apiBaseUrl}identify_speaker_native";
@@ -36,6 +37,8 @@ abstract final class ApiConstants {
       "${_apiBaseUrl}notification_readed";
   static const String getSubPlan = "${_apiBaseUrl}get_subscription_plans";
   static const String getTransaction = "${_apiBaseUrl}get_transactions_by_email";
+  static const String getRegistration = "${_apiBaseUrl}api/registration-text";
+  static const String registerSpeaker = "${_apiBaseUrl}api";
 
 // ElevenLabs endpoints
   static const String elevenLabsApiKey = 'sk_01a87d73ba133e530ecab10f160cb0f4a98bdaad75449fc5';

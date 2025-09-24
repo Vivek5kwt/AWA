@@ -86,12 +86,14 @@
   "other":"इतर",
   "hindi": "हिंदी",
   "trialExpired":"चाचणी कालबाह्य झाली",
-  "nameFieldIntro":"Add the speaker's name to easily recognize their voice.",
+  "nameFieldIntro":"वक्त्याचा आवाज सहज ओळखण्यासाठी त्याचे नाव जोडा.",
   "repeatSentenceHint":"सर्व प्रश्न पूर्ण करण्यासाठी प्रदर्शित वाक्याची पुनरावृत्ती करा.",
   "speakerListIntro":"या स्क्रीनवर तुमचे नोंदणीकृत स्पीकर्स सूचीबद्ध आहेत.",
   "speakerAddIntro":"नवीन आवाज नोंदणी करण्यासाठी स्पीकर जोडा वर टॅप करा.",
-  "friendListIntro":"Browse people and send them a friend request.",
-  "friendAddIntro":"Tap the add icon to connect and start chatting.",
-  "friendBookIntro":"Your approved friends appear here.",
-  "friendChatIntro":"Tap the chat bubble to start a conversation."
+  "friendListIntro":"लोकांना ब्राउझ करा आणि त्यांना फ्रेंड रिक्वेस्ट पाठवा.",
+  "friendAddIntro":"कनेक्ट करण्यासाठी आणि चॅटिंग सुरू करण्यासाठी जोडा आयकॉनवर टॅप करा.",
+  "friendBookIntro":"तुमचे मंजूर मित्र येथे दिसतात.",
+  "friendChatIntro":"संभाषण सुरू करण्यासाठी चॅट बबलवर टॅप करा.",
+  "permissionRequiredMic":"माइकची परवानगी आवश्यक आहे"
+
 }

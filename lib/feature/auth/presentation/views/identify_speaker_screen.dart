@@ -177,65 +177,59 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
     await _fetchSpeakers();
   }
 
-  Future<void> _fetchSpeakers() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-      _speakers = [];
-    });
+  /// Fetch speakers from server.
+  /// If [showLoading] is false, we won't show the full-screen loading spinner or clear the current list.
+  /// This is useful when performing background refreshes (e.g. after delete) to avoid flicker.
+  Future<void> _fetchSpeakers({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _loading = true;
+        _error = null;
+        _speakers = [];
+      });
+    } else {
+      setState(() {
+        _error = null;
+      });
+    }
+
     try {
       final uri = Uri.parse('${ApiConstants.listSpeaker}$_email');
       final resp = await http.get(uri);
 
-      // ==== FIXED LOGIC ====
       if (resp.statusCode == 204) {
         await Future.delayed(const Duration(milliseconds: 600));
         if (mounted) showAccountDeletedDialog();
-        setState(() {
-          _loading = false;
-        });
+        if (showLoading) {
+          setState(() {
+            _loading = false;
+          });
+        }
         return;
       } else if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
         final raw = data['speakers'] as List<dynamic>? ?? [];
-        setState(() {
-          _speakers = raw.map((e) => Speaker.fromJson(e as Map<String, dynamic>)).toList();
-          _error = null; // no error
-        });
-        _listAnimController.forward(from: 0);
+        if (mounted) {
+          setState(() {
+            _speakers = raw.map((e) => Speaker.fromJson(e as Map<String, dynamic>)).toList();
+            _error = null;
+          });
+          _listAnimController.forward(from: 0);
+        }
       } else {
-        setState(() => _error = 'Load failed: ${resp.statusCode}');
+        if (mounted) setState(() => _error = 'Load failed: ${resp.statusCode}');
       }
-      // =====================
     } catch (e) {
-      setState(() => _error = 'Error: $e');
+      if (mounted) setState(() => _error = 'Error: $e');
     } finally {
-      setState(() {
-        _loading = false;
-      });
+      if (showLoading && mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
-  Future<http.Response> _postMultipartAndFollow(
-      Uri targetUri, Map<String, String> fields) async {
-    var request = http.MultipartRequest('POST', targetUri);
-    request.fields.addAll(fields);
-    var streamed = await request.send();
-    var response = await http.Response.fromStream(streamed);
-
-    if ((response.statusCode == 307 || response.statusCode == 302) &&
-        streamed.headers.containsKey('location')) {
-      final redirectLocation = streamed.headers['location']!;
-      final newUri = Uri.parse(redirectLocation);
-
-      var retryRequest = http.MultipartRequest('POST', newUri);
-      retryRequest.fields.addAll(fields);
-      var retryStreamed = await retryRequest.send();
-      return await http.Response.fromStream(retryStreamed);
-    }
-
-    return response;
-  }
   Future<void> _goToAddSpeaker() async {
     final result = await context.push<bool>(
       '/addContact',
@@ -248,22 +242,34 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
       await _fetchSpeakers();
     }
   }
+
   Future<void> _deleteSpeaker(Speaker s) async {
-    final endpoint = Uri.parse(ApiConstants.deleteSpeaker);
+   final speakerEmail = s.email.isNotEmpty ? s.email : s.id;
+    final encodedSpeaker = Uri.encodeComponent(speakerEmail);
+
+    final operatorRaw =  s.name;
+    final encodedOperator = Uri.encodeComponent(operatorRaw);
+
+    final endpoint = Uri .parse('${ApiConstants.deleteSpeaker}$encodedSpeaker/$encodedOperator');
+    print('eggedfsfsf $endpoint');
 
     try {
-      final response1 = await _postMultipartAndFollow(endpoint, {
-        'name': s.name,
-        'email': _email,
-      });
+      final response = await http.delete(endpoint);
 
-      if (response1.statusCode == 200) {
-        final data = jsonDecode(response1.body) as Map<String, dynamic>;
-        final serverMessage =
-            data['message']?.toString() ?? 'Speaker deleted successfully';
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        String serverMessage = 'Speaker deleted successfully';
+        if (response.body.isNotEmpty) {
+          try {
+            final data = jsonDecode(response.body);
+            if (data is Map && data['message'] != null) {
+              serverMessage = data['message'].toString();
+            }
+          } catch (_) {
+          }
+        }
 
         setState(() {
-          _speakers.removeWhere((element) => element.id == s.id);
+          _speakers.removeWhere((element) => element.id == s.id || element.email == s.email);
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -278,43 +284,29 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
             ),
           ),
         );
+
+        await _fetchSpeakers(showLoading: false);
         return;
       }
 
-      if (response1.statusCode == 422) {
-        final response2 = await _postMultipartAndFollow(endpoint, {
-          'name': s.name,
-          'phone_number': widget.phoneNumber,
-        });
-
-        if (response2.statusCode == 200) {
-          final data = jsonDecode(response2.body) as Map<String, dynamic>;
-          final serverMessage =
-              data['message']?.toString() ?? 'Speaker deleted successfully';
-
-          setState(() {
-            _speakers.removeWhere((element) => element.id == s.id);
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(serverMessage),
-              backgroundColor: Colors.green.shade600,
-              behavior: SnackBarBehavior.floating,
-              action: SnackBarAction(
-                label: 'Dismiss',
-                textColor: Colors.white,
-                onPressed: () {},
-              ),
-            ),
-          );
-          return;
+      String message = 'Delete failed: ${response.statusCode}';
+      if (response.body.isNotEmpty) {
+        try {
+          final data = jsonDecode(response.body);
+          if (data is Map && data['message'] != null) {
+            message = data['message'].toString();
+          } else if (data is Map && data['errors'] != null) {
+            message = data['errors'].toString();
+          } else if (data is String) {
+            message = data;
+          }
+        } catch (_) {
         }
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Delete failed: ${response1.statusCode}'),
+          content: Text(message),
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating,
           action: SnackBarAction(
@@ -629,7 +621,6 @@ class SpeakerScreenState extends State<SpeakerScreen> with TickerProviderStateMi
                                       ),
                                     ),
                                   ),
-                                  // ==== FIX: Name + Badge in Wrap to avoid overflow ====
                                   title: Wrap(
                                     crossAxisAlignment: WrapCrossAlignment.center,
                                     spacing: 10,
@@ -830,14 +821,30 @@ class Speaker {
   });
 
   factory Speaker.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'];
+    final idStr = rawId != null ? rawId.toString() : '';
+
+    final rawName = json['name'];
+    final nameStr = rawName != null ? rawName.toString() : '';
+
+    final rawEmail = json['email'];
+    final emailStr = rawEmail != null ? rawEmail.toString() : '';
+
+    final rawEmbedding = json['embedding_count'];
+    int embedding = 0;
+    if (rawEmbedding is int) {
+      embedding = rawEmbedding;
+    } else if (rawEmbedding is String) {
+      embedding = int.tryParse(rawEmbedding) ?? 0;
+    } else if (rawEmbedding is double) {
+      embedding = rawEmbedding.toInt();
+    }
+
     return Speaker(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      email: json['email'] as String? ?? '',
-      embeddingCount:
-      json['embedding_count'] is int
-          ? json['embedding_count'] as int
-          : 0,
+      id: idStr,
+      name: nameStr,
+      email: emailStr,
+      embeddingCount: embedding,
     );
   }
 }

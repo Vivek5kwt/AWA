@@ -16,7 +16,6 @@ class NetworkInfoImplementation implements NetworkInfo {
   @override
   Future<bool> get isConnected async {
     final result = await connectivity.checkConnectivity();
-    print("Internet connection result is: $result");
 
     switch (result) {
       case ConnectivityResult.mobile:

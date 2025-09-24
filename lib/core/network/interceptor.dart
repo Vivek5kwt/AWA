@@ -38,7 +38,7 @@ class Injector {
     //int? userId = Getters.getLoginUser?.id;
     if (token != null) {
       //  printLog("Logged in user Id==>>$userId");
-      printLog("AuthToken==>> Bearer $token");
+      // printLog("AuthToken==>> Bearer $token");
       var headerOptions = Options(headers: {
         'Authorization': 'Bearer $token',
         // options.headers['Authorization'] = 'Bearer ' +usertoken!;
