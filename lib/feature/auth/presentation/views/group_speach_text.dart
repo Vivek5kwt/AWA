@@ -16,6 +16,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../../open_ai_transcription.dart';
 
+
 class GroupSpeechToTextScreen extends StatefulWidget {
   final bool isDarkMode;
   final String phoneNumber;
@@ -493,8 +494,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     } catch (_) {}
     _transcriptionService = null;
 
+    // Read user email from shared preferences and append as query param to stream URL
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('email') ?? '';
+    final urlWithEmail =
+        ApiConstants.streamUrl + '?email=${Uri.encodeComponent(email)}';
+
     _transcriptionService = OpenAIRealtimeTranscriptionService(
-        ApiConstants.streamUrl, _selectedLanguageCode);
+        urlWithEmail, _selectedLanguageCode);
     await _initTranscriptionService();
   }
 
@@ -626,8 +633,15 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
       } catch (_) {}
       _transcriptionService = null;
     }
+
+    // Read user email and attach it to the stream URL as a query parameter
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('email') ?? '';
+    final urlWithEmail =
+        ApiConstants.streamUrl + '?email=${Uri.encodeComponent(email)}';
+
     _transcriptionService =
-        OpenAIRealtimeTranscriptionService(ApiConstants.streamUrl, _selectedLanguageCode);
+        OpenAIRealtimeTranscriptionService(urlWithEmail, _selectedLanguageCode);
     await _initTranscriptionService();
 
     setState(() {
@@ -1395,4 +1409,3 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     );
   }
 }
-

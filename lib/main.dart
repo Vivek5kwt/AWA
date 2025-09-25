@@ -13,6 +13,7 @@ import 'dart:async';
 
 import 'l10n/app_localizations.dart';
 
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -108,7 +109,7 @@ class _MyAppState extends State<MyApp> {
           Locale('bn'),
           Locale('ur'),
         ],
-        localizationsDelegates: const [
+        localizationsDelegates: [
           AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
