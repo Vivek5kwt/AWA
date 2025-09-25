@@ -199,7 +199,6 @@ class GlassyTransactionCard extends StatelessWidget {
         : txn['status']?.toString().toLowerCase() == 'pending'
         ? Colors.orangeAccent
         : Colors.redAccent;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(

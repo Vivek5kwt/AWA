@@ -1,6 +1,5 @@
 import 'package:awa/config/local_extension.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 class PrivacyPolicyScreen extends StatelessWidget {
   final bool isDarkMode;

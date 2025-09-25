@@ -2,7 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:go_router/go_router.dart'; // <-- GoRouter import
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/utils/routing/routes.dart';
 
@@ -266,7 +266,6 @@ class _GlassButton extends StatelessWidget {
               ),
             ),
           ),
-          // Ripple tap effect
           Positioned.fill(
             child: Material(
               color: Colors.transparent,

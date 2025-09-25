@@ -1139,7 +1139,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             : null,
         'lock': _trialSkip ? false : !_trialExists,
       },
-      {
+    /*  {
         'icon': Icons.book,
         'label': context.loc.registerSpeaker,
         'key': _speakerBookKey,
@@ -1154,8 +1154,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         )
             : null,
         'lock': _trialSkip ? false : !_trialExists,
-      },
-      {
+      },*/
+/*      {
         'icon': Icons.person_add_alt_1,
         'label': context.loc.addFriends,
         'key': _addFriendsKey,
@@ -1168,7 +1168,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           },
         ),
         'lock': false,
-      },
+      },*/
       {
         'icon': Icons.book,
         'label': context.loc.friendBook,
@@ -2368,9 +2368,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       itemCount: buttons.length,
                       gridDelegate:
                       const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 3,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
                         childAspectRatio: 0.75,
                       ),
                       itemBuilder: (context, index) {

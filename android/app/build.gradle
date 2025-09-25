@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.example.awa"
-    compileSdk = 35      // You can bump this if you update your Android SDK
+    compileSdk = 36     // You can bump this if you update your Android SDK
 
     ndkVersion = flutter.ndkVersion
 

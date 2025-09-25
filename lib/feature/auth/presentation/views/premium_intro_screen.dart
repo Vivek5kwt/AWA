@@ -25,7 +25,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
     with SingleTickerProviderStateMixin {
   bool _freeTrialEnabled = true;
 
-  // Dynamic plans
   List<Map<String, dynamic>> _plans = [];
   Map<String, dynamic>? _selectedPlan;
   bool _isLoading = true;
@@ -117,20 +116,17 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // BG Gradient
           Container(
             decoration: BoxDecoration(
               gradient: awaGradient,
             ),
           ),
-          // Glass overlay
           BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
               color: Colors.black.withOpacity(0.36),
             ),
           ),
-          // Content
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -139,7 +135,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Logo with Glow
                     AnimatedBuilder(
                       animation: _glowAnim,
                       builder: (_, __) => Container(
@@ -168,7 +163,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                       ),
                     ),
                     const SizedBox(height: 22),
-                    // Main Glass Panel
                     Container(
                       decoration: glass,
                       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 32),
@@ -205,7 +199,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                           _buildFeature(Icons.lock_open_rounded, "Unlimited content access"),
                           _buildFeature(Icons.no_adult_content, "No annoying ads"),
                           const SizedBox(height: 22),
-                          // Free trial toggle
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -231,7 +224,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                             ],
                           ),
                           const SizedBox(height: 15),
-                          // Plan picker
                           _buildPlansSection(),
                           const SizedBox(height: 13),
                           Text(
@@ -243,7 +235,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                             ),
                           ),
                           const SizedBox(height: 22),
-                          // Continue Button
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
@@ -270,7 +261,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                             ),
                           ),
                           const SizedBox(height: 10),
-                          // Maybe Later Button
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
@@ -297,7 +287,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
                       ),
                     ),
                     const SizedBox(height: 28),
-                    // How Free Trial Works
                     _HowTrialWorksPanel(
                       isYearly: _selectedPlan?['plan_name']?.toLowerCase().contains('year') ?? false,
                     ),
@@ -447,7 +436,6 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
   }
 }
 
-// How Free Trial Works panel
 class _HowTrialWorksPanel extends StatelessWidget {
   final bool isYearly;
   const _HowTrialWorksPanel({required this.isYearly});

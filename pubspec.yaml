@@ -70,7 +70,7 @@ dependencies:
   web_socket_channel: 3.0.3
   openai_realtime_dart: ^0.0.6
   hive_flutter: ^1.1.0
-
+  android_intent_plus: ^6.0.0
 
 
 

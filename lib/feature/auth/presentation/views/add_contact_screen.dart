@@ -1570,7 +1570,6 @@ class _AddContactScreenState extends State<AddContactScreen>
                           ),
                         ),
                       const SizedBox(height: 6),
-
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8.0),
                         child: _buildInstructionPanel(size.width * 0.92),

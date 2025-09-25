@@ -92,8 +92,7 @@ final GoRouter appRouter = GoRouter(
         final phone = extra['phoneNumber'] ?? '';
         final isDarkMode = extra['isDarkMode'] ?? false;
         return GroupSpeechToTextScreen(
-          phoneNumber: phone,
-          isDarkMode: isDarkMode,
+
         );
       },
     ),
