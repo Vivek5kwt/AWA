@@ -183,7 +183,7 @@ class _AddContactScreenState extends State<AddContactScreen>
 
     final dir = await getTemporaryDirectory();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final filePath = '${dir.path}/passage_${_currentIndex + 1}_$timestamp.m4a';
+    final filePath = '${dir.path}/passage_${_currentIndex + 1}_$timestamp.wav';
     _currentRecordingPath = filePath;
 
     try {
@@ -191,11 +191,13 @@ class _AddContactScreenState extends State<AddContactScreen>
       _micPulse.forward(from: 0.4);
     } catch (_) {}
 
+    // FIX: Use wav encoder instead of pcm16bits, and match sample rate to backend
     await _recorder.start(
       const rec.RecordConfig(
-        encoder: rec.AudioEncoder.aacLc,
-        bitRate: 128000,
-        sampleRate: 44100,
+        encoder: rec.AudioEncoder.wav,  // Changed from pcm16bits
+        bitRate: 128000,                // Reduced bit rate (was 256000)
+        sampleRate: 16000,              // Changed from 24000 to match Python
+        numChannels: 1,                 // Explicitly set mono
       ),
       path: filePath,
     );
@@ -234,7 +236,6 @@ class _AddContactScreenState extends State<AddContactScreen>
         _lastVoiceTime = DateTime.now();
         _silenceHintShown = false;
       }
-
     });
 
     _maxRecordTimer = Timer(Duration(milliseconds: maxRecordMs), () async {
@@ -338,7 +339,6 @@ class _AddContactScreenState extends State<AddContactScreen>
                       ),
                     ),
                   ),
-
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [

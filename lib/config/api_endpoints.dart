@@ -1,12 +1,13 @@
 part of '../core/network/http_service.dart';
 abstract final class ApiConstants {
   //live
-  //static const String baseUrl = "http://172.232.104.30:5000";
-  static const String streamUrl = "ws://192.168.1.31:8001/ws/transcribe";
+  static const String baseUrl = "http://172.232.104.30:5000";
+  //static const String baseUrl = "http://139.59.41.99:8001";
+  static const String streamUrl = "ws://139.59.41.99:8001/ws/transcribe";
   //local
-  static const String baseUrl = "http://192.168.1.31:8001";
+  //static const String baseUrl = "http://192.168.1.31:8001";
   static const String googleApiKey = 'AIzaSyBtUTh-qBSF35PlyBIJVJz9SU8mj2Jn1Hw';
-  static const String googleProjectId = 'awa-dev-501dc';
+  static const String googleProjectId = 'awa-dev -501dc';
   static const String _apiBaseUrl = "${baseUrl}/";
   static const String registerUser = "${_apiBaseUrl}register_user";
   static const String loginUser = "${_apiBaseUrl}lo gin_user";

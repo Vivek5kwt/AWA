@@ -94,5 +94,6 @@
   "friendAddIntro":"कनेक्ट करने और चैटिंग शुरू करने के लिए ऐड आइकन पर टैप करें।",
   "friendBookIntro":"आपके स्वीकृत मित्र यहां दिखाई देंगे.",
   "friendChatIntro":"बातचीत शुरू करने के लिए चैट बबल पर टैप करें।",
-  "permissionRequiredMic":"माइक की अनुमति आवश्यक है"
+  "permissionRequiredMic":"माइक की अनुमति आवश्यक है",
+  "gotIt":"समझ गया"
 }
