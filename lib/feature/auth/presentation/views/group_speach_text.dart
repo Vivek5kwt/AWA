@@ -676,6 +676,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
 
     if (!await _recorder.hasPermission()) return;
 
+
     if (_transcriptionService != null) {
       try {
         await _transcriptionService!.close();
