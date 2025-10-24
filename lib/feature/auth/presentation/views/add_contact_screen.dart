@@ -32,6 +32,17 @@ class AddContactScreen extends StatefulWidget {
 
 class _AddContactScreenState extends State<AddContactScreen>
     with TickerProviderStateMixin {
+  final List<Map<String, String>> _languageOptions = const [
+    {'code': 'en', 'name': 'English'},
+    {'code': 'hi', 'name': 'Hindi'},
+    {'code': 'pa', 'name': 'Punjabi'},
+    {'code': 'gu', 'name': 'Gujarati'},
+    {'code': 'ta', 'name': 'Tamil'},
+    {'code': 'mr', 'name': 'Marathi'},
+    {'code': 'bn', 'name': 'Bengali'},
+    {'code': 'ur', 'name': 'Urdu'},
+  ];
+
   final List<String> _sentences = [
     "The quick brown fox jumps over the lazy dog. This voice sample will be used to register your speech profile. Speak naturally and clearly in your normal tone.",
   ];
@@ -53,6 +64,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   late final Animation<double> _burstScale;
   List<bool> _wordVisible = [];
   String _email = '';
+  String _selectedLanguageCode = 'en';
   bool _userStartedSpeaking = false;
   DateTime? _lastVoiceTime;
   bool _dialogActive = false;
@@ -76,6 +88,7 @@ class _AddContactScreenState extends State<AddContactScreen>
   DateTime? _recordingStartTime;
   int _recordSeconds = 0;
   bool _showTips = false;
+  bool _languageInitialized = false;
 
   @override
   void initState() {
@@ -107,11 +120,37 @@ class _AddContactScreenState extends State<AddContactScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       () async {
+        await _initializeLanguage(context);
         await _fetchRegistrationText();
         if (_nameController!.text.trim().isEmpty) {
           await _askForContactName();
         }
       }();
+    });
+  }
+
+  Future<void> _initializeLanguage(BuildContext context) async {
+    if (_languageInitialized && _isLanguageSupported(_selectedLanguageCode)) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('speaker_registration_language');
+    String resolved = _selectedLanguageCode;
+
+    if (_isLanguageSupported(saved)) {
+      resolved = saved!;
+    } else {
+      final locale = Localizations.localeOf(context);
+      if (_isLanguageSupported(locale.languageCode)) {
+        resolved = locale.languageCode;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _selectedLanguageCode = resolved;
+      _languageInitialized = true;
     });
   }
 
@@ -138,8 +177,33 @@ class _AddContactScreenState extends State<AddContactScreen>
     if (!micShown) await prefs.setBool('add_contact_mic_tutorial_shown', true);
   }
 
+  bool _isLanguageSupported(String? code) {
+    if (code == null || code.isEmpty) return false;
+    return _languageOptions.any((lang) => lang['code'] == code);
+  }
+
+  String _languageNameFromCode(String? code) {
+    final resolved = _isLanguageSupported(code) ? code! : 'en';
+    return _languageOptions
+        .firstWhere((lang) => lang['code'] == resolved, orElse: () => _languageOptions.first)['name']!;
+  }
+
+  Future<void> _persistSelectedLanguage(String code) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('speaker_registration_language', code);
+  }
+
+  Uri _appendLanguageQuery(Uri uri) {
+    final lang = _selectedLanguageCode;
+    if (!_isLanguageSupported(lang)) return uri;
+    final params = Map<String, String>.from(uri.queryParameters);
+    params['language_key'] = lang;
+    return uri.replace(queryParameters: params);
+  }
+
   void _revealWords() {
-    final words = _sentences[_currentIndex].split(' ');
+    final sourceText = _registrationText ?? _sentences[_currentIndex];
+    final words = sourceText.split(' ');
     _wordVisible = List<bool>.filled(words.length, true);
     if (mounted) setState(() {});
   }
@@ -293,177 +357,266 @@ class _AddContactScreenState extends State<AddContactScreen>
   Future<void> _askForContactName() async {
     _dialogActive = true;
     final isDark = widget.isDarkMode;
-    final prefs = await SharedPreferences.getInstance();
 
-    final enteredName = await showDialog<String>(
+    final result = await showDialog<Map<String, String>>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return Dialog(
-          backgroundColor: isDark ? const Color(0xFF121218) : Colors.white,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 32),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned(
-                    top: -14,
-                    right: -14,
-                    child: GestureDetector(
-                      onTap: () => Navigator.of(dialogContext).pop(),
-                      behavior: HitTestBehavior.translucent,
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        alignment: Alignment.center,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isDark
-                                ? Colors.redAccent.withOpacity(0.95)
-                                : Colors.grey.shade300,
-                          ),
-                          child: Icon(
-                            Icons.close,
-                            size: 20,
-                            color: isDark ? Colors.white : Colors.black,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
+        String tempLanguageCode = _selectedLanguageCode;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: isDark ? const Color(0xFF121218) : Colors.white,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
+                  child: Stack(
+                    clipBehavior: Clip.none,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: isDark
-                                ? [Colors.cyanAccent, Colors.deepPurpleAccent]
-                                : [Colors.deepPurple, Colors.cyan],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black26,
-                              blurRadius: 8,
-                              offset: const Offset(0, 6),
-                            )
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.contact_page_rounded,
-                          size: 32,
-                          color: isDark ? Colors.black87 : Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-
-                      Text(
-                        context.loc.registerSpeaker,
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.cyanAccent : Colors.deepPurple,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      Text(
-                        context.loc.enterAFriendlyName,
-                        style: TextStyle(
-                          color: isDark ? Colors.white70 : Colors.black87,
-                          fontSize: 14,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-
-                      const SizedBox(height: 14),
-
-                      TextField(
-                        controller: _nameController,
-                        autofocus: true,
-                        textInputAction: TextInputAction.done,
-                        decoration: InputDecoration(
-                          hintText: context.loc.hintName,
-                          hintStyle: TextStyle(
-                            color: isDark ? Colors.white38 : Colors.grey[500],
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? Colors.white.withOpacity(0.03)
-                              : Colors.grey.shade100,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 12,
-                            horizontal: 16,
-                          ),
-                        ),
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        onSubmitted: (val) {
-                          if (val.trim().isNotEmpty) {
-                            Navigator.of(dialogContext).pop(val.trim());
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 18),
-
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.check_circle, size: 20),
-                          label: Text(context.loc.saveContinue),
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor:
-                                Theme.of(context).colorScheme.onPrimary,
-                            backgroundColor: Theme.of(context).primaryColor,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                      Positioned(
+                        top: -14,
+                        right: -14,
+                        child: GestureDetector(
+                          onTap: () => Navigator.of(dialogContext).pop(),
+                          behavior: HitTestBehavior.translucent,
+                          child: Container(
+                            width: 48,
+                            height: 48,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isDark
+                                    ? Colors.redAccent.withOpacity(0.95)
+                                    : Colors.grey.shade300,
+                              ),
+                              child: Icon(
+                                Icons.close,
+                                size: 20,
+                                color: isDark ? Colors.white : Colors.black,
+                              ),
                             ),
-                            textStyle: const TextStyle(
+                          ),
+                        ),
+                      ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: isDark
+                                    ? [Colors.cyanAccent, Colors.deepPurpleAccent]
+                                    : [Colors.deepPurple, Colors.cyan],
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 6),
+                                )
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.contact_page_rounded,
+                              size: 32,
+                              color: isDark ? Colors.black87 : Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          Text(
+                            context.loc.registerSpeaker,
+                            style: TextStyle(
+                              fontSize: 20,
                               fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                              color: isDark ? Colors.cyanAccent : Colors.deepPurple,
                             ),
                           ),
-                          onPressed: () {
-                            final val = _nameController!.text.trim();
-                            if (val.isEmpty) {
-                              _showSnackbar(
-                                  "Name cannot be empty", Colors.redAccent);
-                              return;
-                            }
-                            Navigator.of(dialogContext).pop(val);
-                          },
-                        ),
+                          const SizedBox(height: 8),
+
+                          Text(
+                            context.loc.enterAFriendlyName,
+                            style: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              fontSize: 14,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+
+                          const SizedBox(height: 14),
+
+                          TextField(
+                            controller: _nameController,
+                            autofocus: true,
+                            textInputAction: TextInputAction.done,
+                            decoration: InputDecoration(
+                              hintText: context.loc.hintName,
+                              hintStyle: TextStyle(
+                                color: isDark ? Colors.white38 : Colors.grey[500],
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? Colors.white.withOpacity(0.03)
+                                  : Colors.grey.shade100,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                                horizontal: 16,
+                              ),
+                            ),
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            onSubmitted: (val) {
+                              final trimmed = val.trim();
+                              if (trimmed.isNotEmpty) {
+                                Navigator.of(dialogContext).pop({
+                                  'name': trimmed,
+                                  'language': tempLanguageCode,
+                                });
+                              }
+                            },
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              context.loc.language,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white70 : Colors.black87,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+
+                          DropdownButtonFormField<String>(
+                            value: _isLanguageSupported(tempLanguageCode)
+                                ? tempLanguageCode
+                                : _selectedLanguageCode,
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: isDark
+                                  ? Colors.white.withOpacity(0.03)
+                                  : Colors.grey.shade100,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 12,
+                                horizontal: 16,
+                              ),
+                            ),
+                            dropdownColor:
+                                isDark ? const Color(0xFF1C1C24) : Colors.white,
+                            icon: Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: isDark ? Colors.cyanAccent : Colors.deepPurple,
+                            ),
+                            items: _languageOptions
+                                .map(
+                                  (lang) => DropdownMenuItem<String>(
+                                    value: lang['code'],
+                                    child: Text(
+                                      lang['name']!,
+                                      style: TextStyle(
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value == null) return;
+                              setDialogState(() {
+                                tempLanguageCode = value;
+                              });
+                            },
+                          ),
+
+                          const SizedBox(height: 18),
+
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.check_circle, size: 20),
+                              label: Text(context.loc.saveContinue),
+                              style: ElevatedButton.styleFrom(
+                                foregroundColor:
+                                    Theme.of(context).colorScheme.onPrimary,
+                                backgroundColor: Theme.of(context).primaryColor,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              onPressed: () {
+                                final val = _nameController!.text.trim();
+                                if (val.isEmpty) {
+                                  _showSnackbar(
+                                      "Name cannot be empty", Colors.redAccent);
+                                  return;
+                                }
+                                Navigator.of(dialogContext).pop({
+                                  'name': val,
+                                  'language': tempLanguageCode,
+                                });
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
 
     _dialogActive = false;
 
-    if (enteredName == null || enteredName.trim().isEmpty) {
+    if (result == null) {
+      if (mounted) context.pop();
+      return;
+    }
+
+    final enteredName = (result['name'] ?? '').trim();
+    final selectedLanguage = result['language'] ?? _selectedLanguageCode;
+
+    if (selectedLanguage.isNotEmpty && selectedLanguage != _selectedLanguageCode) {
+      if (mounted) {
+        setState(() {
+          _selectedLanguageCode = selectedLanguage;
+        });
+      }
+      await _persistSelectedLanguage(selectedLanguage);
+      await _fetchRegistrationText();
+    }
+
+    if (enteredName.isEmpty) {
       if (mounted) context.pop();
       return;
     }
@@ -516,7 +669,9 @@ class _AddContactScreenState extends State<AddContactScreen>
         ..fields['name'] = _nameController!.text.trim()
         ..fields['sentence_no'] = (_currentIndex + 1).toString()
         ..fields['email'] = _email
-        ..fields['phone'] = widget.phoneNumber;
+        ..fields['phone'] = widget.phoneNumber
+        ..fields['language_key'] =
+            _isLanguageSupported(_selectedLanguageCode) ? _selectedLanguageCode : 'en';
       req.files.add(await http.MultipartFile.fromPath(
         'audio_file',
         filePath,
@@ -833,13 +988,14 @@ class _AddContactScreenState extends State<AddContactScreen>
     });
 
     try {
+      final previousText = _registrationText;
       Uri uri;
       try {
         final endpoint = ApiConstants.getRegistration;
-        uri = Uri.parse(endpoint);
+        uri = _appendLanguageQuery(Uri.parse(endpoint));
       } catch (_) {
         final base = ApiConstants.baseUrl;
-        uri = Uri.parse('$base/api/registration-text');
+        uri = _appendLanguageQuery(Uri.parse('$base/api/registration-text'));
       }
 
       final response = await http.get(uri);
@@ -866,6 +1022,9 @@ class _AddContactScreenState extends State<AddContactScreen>
             _registrationTitle = null;
             _registrationText = body;
           });
+        }
+        if ((_registrationText ?? '') != (previousText ?? '')) {
+          _revealWords();
         }
       } else {
         setState(() {
@@ -1148,7 +1307,6 @@ class _AddContactScreenState extends State<AddContactScreen>
 
   @override
   Widget build(BuildContext context) {
-    final words = _sentences[_currentIndex].split(' ');
     final size = MediaQuery.of(context).size;
     final gradientColors = widget.isDarkMode
         ? [const Color(0xFF0F1724), const Color(0xFF0F1020), const Color(0xFF071229)]
@@ -1172,6 +1330,7 @@ class _AddContactScreenState extends State<AddContactScreen>
         : null;
 
     final passageText = _registrationText ?? _sentences[_currentIndex];
+    final words = passageText.split(' ');
 
     final micSize = min(150.0, size.width * 0.34);
 
@@ -1293,6 +1452,22 @@ class _AddContactScreenState extends State<AddContactScreen>
                               ),
                               textAlign: TextAlign.center,
                             ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(widget.isDarkMode ? 0.32 : 0.12),
+                              borderRadius: BorderRadius.circular(30),
+                              border: Border.all(color: Colors.white.withOpacity(0.12)),
+                            ),
+                            child: Text(
+                              '${context.loc.language}: ${_languageNameFromCode(_selectedLanguageCode)}',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.92),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
