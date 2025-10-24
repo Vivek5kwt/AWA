@@ -46,6 +46,7 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
   String _myName = '';
   Color _myColor = const Color(0xFF1E88E5);
   final List<Map<String, String>> _availableLanguages = [
+    // Common Indian languages first (with India flag for user clarity)
     {'code': 'en', 'name': 'English', 'emoji': '🇮🇳'},
     {'code': 'hi', 'name': 'Hindi', 'emoji': '🇮🇳'},
     {'code': 'pa', 'name': 'Punjabi', 'emoji': '🇮🇳'},
@@ -54,9 +55,23 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     {'code': 'ta', 'name': 'Tamil', 'emoji': '🇮🇳'},
     {'code': 'bn', 'name': 'Bengali', 'emoji': '🇮🇳'},
     {'code': 'ur', 'name': 'Urdu', 'emoji': '🇮🇳'},
+    {'code': 'kn', 'name': 'Kannada', 'emoji': '🇮🇳'},
+    {'code': 'ml', 'name': 'Malayalam', 'emoji': '🇮🇳'},
+    {'code': 'es', 'name': 'Spanish', 'emoji': '🇪🇸'},
+    {'code': 'fr', 'name': 'French', 'emoji': '🇫🇷'},
+    {'code': 'de', 'name': 'German', 'emoji': '🇩🇪'},
+    {'code': 'zh', 'name': 'Chinese', 'emoji': '🇨🇳'},
+    {'code': 'ar', 'name': 'Arabic', 'emoji': '🇸🇦'},
+    {'code': 'pt', 'name': 'Portuguese', 'emoji': '🇵🇹'},
+    {'code': 'ru', 'name': 'Russian', 'emoji': '🇷🇺'},
+    {'code': 'ja', 'name': 'Japanese', 'emoji': '🇯🇵'},
+    {'code': 'ko', 'name': 'Korean', 'emoji': '🇰🇷'},
+    {'code': 'tr', 'name': 'Turkish', 'emoji': '🇹🇷'},
+    {'code': 'uk', 'name': 'Ukrainian', 'emoji': '🇺🇦'},
+    {'code': 'fa', 'name': 'Persian / Farsi', 'emoji': '🇮🇷'},
   ];
 
-  String _SelectedLanguageCode = 'en';
+  // Use a single selected language variable (avoid duplicate names/casing)
   String _selectedLanguageCode = 'en';
 
   final FlutterTts _flutterTts = FlutterTts();
@@ -281,6 +296,14 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
     await Future.delayed(const Duration(milliseconds: 200));
     if (!mounted) return;
 
+    // Prepare separated lists: Indian and International
+    final indianLanguages = _availableLanguages
+        .where((l) => (l['emoji'] ?? '') == '🇮🇳')
+        .toList();
+    final internationalLanguages = _availableLanguages
+        .where((l) => (l['emoji'] ?? '') != '🇮🇳')
+        .toList();
+
     String localSelected = _selectedLanguageCode;
 
     final result = await showModalBottomSheet<String>(
@@ -295,225 +318,385 @@ class _GroupSpeechToTextScreenState extends State<GroupSpeechToTextScreen>
         return WillPopScope(
           onWillPop: () async => !force,
           child: SafeArea(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-              child: StatefulBuilder(builder: (context, setStateSheet) {
-                return Center(
-                  child: Container(
-                    constraints: BoxConstraints(
-                      maxWidth: 700,
-                      maxHeight: maxHeight,
-                    ),
-                    margin: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 24),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
+            child: Center(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxWidth: 700,
+                  maxHeight: maxHeight,
+                ),
+                margin:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color:
+                      widget.isDarkMode ? const Color(0xFF111217) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
                       color: widget.isDarkMode
-                          ? const Color(0xFF111217)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: widget.isDarkMode
-                              ? Colors.black.withOpacity(0.6)
-                              : Colors.black12,
-                          blurRadius: 24,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
+                          ? Colors.black.withOpacity(0.6)
+                          : Colors.black12,
+                      blurRadius: 24,
+                      offset: const Offset(0, 12),
                     ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          "Select Meeting Language",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: widget.isDarkMode
-                                ? Colors.white
-                                : Colors.black87,
-                          ),
+                  ],
+                ),
+                child: StatefulBuilder(builder: (context, setStateSheet) {
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "Select Meeting Language",
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color:
+                              widget.isDarkMode ? Colors.white : Colors.black87,
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          "Pick the language you'll be speaking in. This helps improve accuracy.",
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: widget.isDarkMode
-                                ? Colors.white70
-                                : Colors.black54,
-                          ),
-                          textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        "Pick the language you'll be speaking in. This helps improve accuracy.",
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: widget.isDarkMode
+                              ? Colors.white70
+                              : Colors.black54,
                         ),
-                        const SizedBox(height: 14),
-                        ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxHeight: max(180, min(420, maxHeight - 180)),
-                          ),
-                          child: GridView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            padding: EdgeInsets.zero,
-                            gridDelegate:
-                                const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              mainAxisSpacing: 10,
-                              crossAxisSpacing: 10,
-                              childAspectRatio: 3.2,
-                            ),
-                            itemCount: _availableLanguages.length,
-                            itemBuilder: (context, index) {
-                              final lang = _availableLanguages[index];
-                              final code = lang['code']!;
-                              final name = lang['name']!;
-                              final emoji = lang['emoji'] ?? '';
-                              final selected = localSelected == code;
-                              return InkWell(
-                                onTap: () {
-                                  setStateSheet(() => localSelected = code);
-                                },
-                                borderRadius: BorderRadius.circular(12),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 250),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12),
-                                  decoration: BoxDecoration(
-                                    color: selected
-                                        ? (widget.isDarkMode
-                                            ? Colors.blueGrey.shade800
-                                            : Colors.blue.shade50)
-                                        : (widget.isDarkMode
-                                            ? Colors.black
-                                            : Colors.grey.shade100),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: selected
-                                        ? Border.all(
-                                            color: widget.isDarkMode
-                                                ? Colors.cyanAccent
-                                                : Colors.blue,
-                                            width: 2)
-                                        : Border.all(
-                                            color: widget.isDarkMode
-                                                ? Colors.transparent
-                                                : Colors.transparent,
-                                            width: 1),
-                                    boxShadow: [
-                                      if (selected)
-                                        BoxShadow(
-                                          color: (widget.isDarkMode
-                                                  ? Colors.cyanAccent
-                                                  : Colors.blue)
-                                              .withOpacity(0.12),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 6),
-                                        )
-                                    ],
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Text(emoji,
-                                          style: const TextStyle(fontSize: 20)),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              name,
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: widget.isDarkMode
-                                                    ? Colors.white
-                                                    : Colors.black87,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              code.toUpperCase(),
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: widget.isDarkMode
-                                                    ? Colors.white70
-                                                    : Colors.black45,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      if (selected)
-                                        Icon(
-                                          Icons.check_circle,
-                                          color: widget.isDarkMode
-                                              ? Colors.cyanAccent
-                                              : Colors.blue,
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 14),
+                      // Use an Expanded ListView so sections can scroll when needed
+                      Expanded(
+                        child: ListView(
+                          padding: EdgeInsets.zero,
                           children: [
-                            if (!force)
-                              Expanded(
-                                child: OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(
-                                      color: widget.isDarkMode
-                                          ? Colors.white12
-                                          : Colors.grey.shade300,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    Navigator.of(bottomSheetContext).pop(null);
-                                  },
-                                  child: Text(
-                                    "Cancel",
+                            // Indian Languages Section
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4.0, vertical: 6),
+                              child: Row(
+                                children: [
+                                  Text("Indian Languages",
+                                      style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: widget.isDarkMode
+                                              ? Colors.white
+                                              : Colors.black87)),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "(${indianLanguages.length})",
                                     style: TextStyle(
                                       color: widget.isDarkMode
                                           ? Colors.white70
-                                          : Colors.black87,
+                                          : Colors.black54,
+                                      fontSize: 12,
+                                    ),
+                                  )
+                                ],
+                              ),
+                            ),
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics:
+                                  const NeverScrollableScrollPhysics(), // scrolling handled by outer ListView
+                              padding: EdgeInsets.zero,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 10,
+                                crossAxisSpacing: 10,
+                                childAspectRatio: 3.2,
+                              ),
+                              itemCount: indianLanguages.length,
+                              itemBuilder: (context, index) {
+                                final lang = indianLanguages[index];
+                                final code = lang['code']!;
+                                final name = lang['name']!;
+                                final emoji = lang['emoji'] ?? '';
+                                final selected = localSelected == code;
+                                return InkWell(
+                                  onTap: () {
+                                    setStateSheet(() => localSelected = code);
+                                  },
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 250),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    decoration: BoxDecoration(
+                                      color: selected
+                                          ? (widget.isDarkMode
+                                              ? Colors.blueGrey.shade800
+                                              : Colors.blue.shade50)
+                                          : (widget.isDarkMode
+                                              ? Colors.black
+                                              : Colors.grey.shade100),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: selected
+                                          ? Border.all(
+                                              color: widget.isDarkMode
+                                                  ? Colors.cyanAccent
+                                                  : Colors.blue,
+                                              width: 2)
+                                          : Border.all(
+                                              color: widget.isDarkMode
+                                                  ? Colors.transparent
+                                                  : Colors.transparent,
+                                              width: 1),
+                                      boxShadow: [
+                                        if (selected)
+                                          BoxShadow(
+                                            color: (widget.isDarkMode
+                                                    ? Colors.cyanAccent
+                                                    : Colors.blue)
+                                                .withOpacity(0.12),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 6),
+                                          )
+                                      ],
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Text(emoji,
+                                            style:
+                                                const TextStyle(fontSize: 20)),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                name,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: widget.isDarkMode
+                                                      ? Colors.white
+                                                      : Colors.black87,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                code.toUpperCase(),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: widget.isDarkMode
+                                                      ? Colors.white70
+                                                      : Colors.black45,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (selected)
+                                          Icon(
+                                            Icons.check_circle,
+                                            color: widget.isDarkMode
+                                                ? Colors.cyanAccent
+                                                : Colors.blue,
+                                          ),
+                                      ],
                                     ),
                                   ),
-                                ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+                            // International Languages Section
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4.0, vertical: 6),
+                              child: Row(
+                                children: [
+                                  Text("International Languages",
+                                      style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          color: widget.isDarkMode
+                                              ? Colors.white
+                                              : Colors.black87)),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "(${internationalLanguages.length})",
+                                    style: TextStyle(
+                                      color: widget.isDarkMode
+                                          ? Colors.white70
+                                          : Colors.black54,
+                                      fontSize: 12,
+                                    ),
+                                  )
+                                ],
                               ),
-                            if (!force) const SizedBox(width: 12),
+                            ),
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics:
+                                  const NeverScrollableScrollPhysics(), // handled by outer ListView
+                              padding: EdgeInsets.zero,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                mainAxisSpacing: 10,
+                                crossAxisSpacing: 10,
+                                childAspectRatio: 3.2,
+                              ),
+                              itemCount: internationalLanguages.length,
+                              itemBuilder: (context, index) {
+                                final lang = internationalLanguages[index];
+                                final code = lang['code']!;
+                                final name = lang['name']!;
+                                final emoji = lang['emoji'] ?? '';
+                                final selected = localSelected == code;
+                                return InkWell(
+                                  onTap: () {
+                                    setStateSheet(() => localSelected = code);
+                                  },
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 250),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    decoration: BoxDecoration(
+                                      color: selected
+                                          ? (widget.isDarkMode
+                                              ? Colors.blueGrey.shade800
+                                              : Colors.blue.shade50)
+                                          : (widget.isDarkMode
+                                              ? Colors.black
+                                              : Colors.grey.shade100),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: selected
+                                          ? Border.all(
+                                              color: widget.isDarkMode
+                                                  ? Colors.cyanAccent
+                                                  : Colors.blue,
+                                              width: 2)
+                                          : Border.all(
+                                              color: widget.isDarkMode
+                                                  ? Colors.transparent
+                                                  : Colors.transparent,
+                                              width: 1),
+                                      boxShadow: [
+                                        if (selected)
+                                          BoxShadow(
+                                            color: (widget.isDarkMode
+                                                    ? Colors.cyanAccent
+                                                    : Colors.blue)
+                                                .withOpacity(0.12),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 6),
+                                          )
+                                      ],
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Text(emoji,
+                                            style:
+                                                const TextStyle(fontSize: 20)),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                name,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: widget.isDarkMode
+                                                      ? Colors.white
+                                                      : Colors.black87,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                code.toUpperCase(),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: widget.isDarkMode
+                                                      ? Colors.white70
+                                                      : Colors.black45,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        if (selected)
+                                          Icon(
+                                            Icons.check_circle,
+                                            color: widget.isDarkMode
+                                                ? Colors.cyanAccent
+                                                : Colors.blue,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          if (!force)
                             Expanded(
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: widget.isDarkMode
-                                      ? Colors.cyanAccent
-                                      : Colors.blue,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                    color: widget.isDarkMode
+                                        ? Colors.white12
+                                        : Colors.grey.shade300,
+                                  ),
                                 ),
                                 onPressed: () {
-                                  Navigator.of(bottomSheetContext)
-                                      .pop(localSelected);
+                                  Navigator.of(bottomSheetContext).pop(null);
                                 },
                                 child: Text(
-                                  "Confirm",
+                                  "Cancel",
                                   style: TextStyle(
                                     color: widget.isDarkMode
-                                        ? Colors.black
-                                        : Colors.white,
-                                    fontWeight: FontWeight.bold,
+                                        ? Colors.white70
+                                        : Colors.black87,
                                   ),
                                 ),
                               ),
-                            )
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
+                            ),
+                          if (!force) const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: widget.isDarkMode
+                                    ? Colors.cyanAccent
+                                    : Colors.blue,
+                              ),
+                              onPressed: () {
+                                Navigator.of(bottomSheetContext)
+                                    .pop(localSelected);
+                              },
+                              child: Text(
+                                "Confirm",
+                                style: TextStyle(
+                                  color:
+                                      widget.isDarkMode ? Colors.black : Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          )
+                        ],
+                      ),
+                    ],
+                  );
+                }),
+              ),
             ),
           ),
         );
