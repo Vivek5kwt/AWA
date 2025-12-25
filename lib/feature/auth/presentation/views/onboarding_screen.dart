@@ -20,21 +20,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       title: "Text Every Spoken Word",
       subtitle: "Real-time speech-to-text for the deaf.",
       description:
-      "AWA instantly converts spoken conversations into clear, readable text—making it easy for deaf individuals to follow group discussions.",
+      "Hearing Access instantly converts spoken conversations into clear, readable text—making it easy for deaf individuals to follow group discussions.",
       imageAsset: "https://cdn-icons-png.flaticon.com/512/1082/1082435.png",
     ),
     _OnboardData(
       title: "Instant Voice to Text",
       subtitle: "Never miss what’s said.",
       description:
-      "AWA listens to every word and shows it as text immediately, helping the hearing impaired stay engaged in real time.",
+      "Hearing Access listens to every word and shows it as text immediately, helping the hearing impaired stay engaged in real time.",
       imageAsset: "https://cdn-icons-png.flaticon.com/512/2920/2920039.png",
     ),
     _OnboardData(
       title: "Inclusive Group Conversations",
       subtitle: "Empowering deaf communication.",
       description:
-      "Feel confident and connected. AWA ensures deaf and hard-of-hearing users are part of every conversation—clearly and equally.",
+      "Feel confident and connected. Hearing Access ensures deaf and hard-of-hearing users are part of every conversation—clearly and equally.",
       imageAsset: "https://cdn-icons-png.flaticon.com/512/3135/3135715.png",
     ),
   ];

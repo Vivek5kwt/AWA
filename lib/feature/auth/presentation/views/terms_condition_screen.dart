@@ -94,7 +94,7 @@ class TermsAndConditionsScreen extends StatelessWidget {
                           fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                   const SizedBox(height: 6),
                   Text(
-                    'By downloading or using AWA, you agree to be bound by these Terms & Conditions.',
+                    'By downloading or using Hearing Access, you agree to be bound by these Terms & Conditions.',
                     style: TextStyle(color: subTextColor),
                   ),
                   const SizedBox(height: 16),
@@ -114,7 +114,7 @@ class TermsAndConditionsScreen extends StatelessWidget {
                           fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                   const SizedBox(height: 6),
                   Text(
-                    'AWA grants you a revocable, non-exclusive, non-transferable, limited license to download, install, and use the app solely for your personal, non-commercial purposes.',
+                    'Hearing Access grants you a revocable, non-exclusive, non-transferable, limited license to download, install, and use the app solely for your personal, non-commercial purposes.',
                     style: TextStyle(color: subTextColor),
                   ),
                   const SizedBox(height: 16),
@@ -144,7 +144,7 @@ class TermsAndConditionsScreen extends StatelessWidget {
                           fontSize: 18, fontWeight: FontWeight.bold, color: textColor)),
                   const SizedBox(height: 6),
                   Text(
-                    'In no event shall AWA be liable for any indirect, incidental, or consequential damages arising out of your use of the app.',
+                    'In no event shall Hearing Access be liable for any indirect, incidental, or consequential damages arising out of your use of the app.',
                     style: TextStyle(color: subTextColor),
                   ),
                   const SizedBox(height: 16),
@@ -171,7 +171,7 @@ class TermsAndConditionsScreen extends StatelessWidget {
 
                   Center(
                     child: Text(
-                      'Thank you for using AWA!',
+                      'Thank you for using Hearing Access!',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,

@@ -748,7 +748,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             SizedBox(width: 8),
             Expanded(
               child: Text(
-                "Subscription activated! Welcome to AWA Premium 🎉",
+                "Subscription activated! Welcome to Hearing Access Premium 🎉",
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
@@ -852,7 +852,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   Icon(Icons.workspace_premium, color: Colors.amber, size: 48),
                   const SizedBox(height: 8),
                   Text(
-                    "AWA Premium Subscription",
+                    "Hearing Access Premium Subscription",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 21,

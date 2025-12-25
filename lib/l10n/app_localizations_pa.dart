@@ -183,7 +183,7 @@ class AppLocalizationsPa extends AppLocalizations {
   String get goPremium => 'ਪ੍ਰੀਮੀਅਮ \'ਤੇ ਜਾਓ';
 
   @override
-  String get awa => 'AWA';
+  String get awa => 'Hearing Access';
 
   @override
   String get premium => 'ਪ੍ਰੀਮੀਅਮ';

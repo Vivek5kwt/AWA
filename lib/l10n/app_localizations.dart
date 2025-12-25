@@ -458,7 +458,7 @@ abstract class AppLocalizations {
   /// No description provided for @awa.
   ///
   /// In en, this message translates to:
-  /// **'AWA'**
+  /// **'Hearing Access'**
   String get awa;
 
   /// No description provided for @premium.
