@@ -101,7 +101,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Welcome to AWA. Your privacy is critically important to us. This Policy explains how we collect, use, and protect your information.',
+                    'Welcome to Hearing Access. Your privacy is critically important to us. This Policy explains how we collect, use, and protect your information.',
                     style: TextStyle(color: subTextColor),
                   ),
                   const SizedBox(height: 16),
@@ -184,7 +184,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'AWA is not directed to children under 13. We do not knowingly collect data from minors.',
+                    'Hearing Access is not directed to children under 13. We do not knowingly collect data from minors.',
                     style: TextStyle(color: subTextColor),
                   ),
                   const SizedBox(height: 16),
@@ -223,7 +223,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
 
                   Center(
                     child: Text(
-                      'Thank you for trusting AWA with your privacy.',
+                      'Thank you for trusting Hearing Access with your privacy.',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,

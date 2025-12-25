@@ -94,7 +94,7 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return ShowCaseWidget(
       builder: (context) => MaterialApp.router(
-        title: 'Awa',
+        title: 'Hearing Access',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(primarySwatch: Colors.blue),
         routerConfig: appRouter,
