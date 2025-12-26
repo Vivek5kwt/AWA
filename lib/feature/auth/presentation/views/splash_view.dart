@@ -19,10 +19,8 @@ class _SplashViewState extends State<SplashView>
   late final AnimationController _lettersController;
   late final Animation<double> _letter1Scale;
   late final Animation<double> _letter2Scale;
-  late final Animation<double> _letter3Scale;
   late final Animation<double> _letter1Opacity;
   late final Animation<double> _letter2Opacity;
-  late final Animation<double> _letter3Opacity;
 
   @override
   void initState() {
@@ -55,13 +53,6 @@ class _SplashViewState extends State<SplashView>
         curve: const Interval(0.2, 0.6, curve: Curves.elasticOut),
       ),
     );
-    _letter3Scale = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _lettersController,
-        curve: const Interval(0.4, 0.8, curve: Curves.elasticOut),
-      ),
-    );
-
     _letter1Opacity = Tween<double>(begin: 0, end: 1).animate(
       CurvedAnimation(
         parent: _lettersController,
@@ -72,12 +63,6 @@ class _SplashViewState extends State<SplashView>
       CurvedAnimation(
         parent: _lettersController,
         curve: const Interval(0.2, 0.6),
-      ),
-    );
-    _letter3Opacity = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _lettersController,
-        curve: const Interval(0.4, 0.8),
       ),
     );
 
@@ -117,9 +102,9 @@ class _SplashViewState extends State<SplashView>
     final size = MediaQuery.of(context).size;
     const textStyle = TextStyle(
       color: Colors.white,
-      fontSize: 48,
+      fontSize: 44,
       fontWeight: FontWeight.bold,
-      letterSpacing: 4,
+      letterSpacing: 2,
     );
 
     return Scaffold(
@@ -173,30 +158,22 @@ class _SplashViewState extends State<SplashView>
                 );
               },
             ),
-            Row(
+            Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 ScaleTransition(
                   scale: _letter1Scale,
                   child: FadeTransition(
                     opacity: _letter1Opacity,
-                    child: const Text('A', style: textStyle),
+                    child: const Text('Hearing', style: textStyle),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(height: 6),
                 ScaleTransition(
                   scale: _letter2Scale,
                   child: FadeTransition(
                     opacity: _letter2Opacity,
-                    child: const Text('W', style: textStyle),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ScaleTransition(
-                  scale: _letter3Scale,
-                  child: FadeTransition(
-                    opacity: _letter3Opacity,
-                    child: const Text('A', style: textStyle),
+                    child: const Text('Access', style: textStyle),
                   ),
                 ),
               ],
