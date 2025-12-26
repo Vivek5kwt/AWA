@@ -1361,129 +1361,148 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           tooltip: 'Menu',
                         ),
                       ),
-                      title: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: _isDarkMode
-                                  ? Colors.cyanAccent.withOpacity(0.13)
-                                  : Colors.white.withOpacity(0.19),
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: _isDarkMode
-                                      ? Colors.cyanAccent.withOpacity(0.23)
-                                      : Colors.blueAccent.withOpacity(0.16),
-                                  blurRadius: 20,
-                                  spreadRadius: 3,
-                                  offset: Offset(0, 6),
-                                ),
-                              ],
-                            ),
-                            child: Image.asset(
-                              'assets/images/awa_logo.webp',
-                              height: 32,
-                              width: 32,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ShaderMask(
-                            shaderCallback: (bounds) => LinearGradient(
-                              colors: _isDarkMode
-                                  ? [
-                                Colors.cyanAccent,
-                                Colors.blueAccent,
-                                Colors.white,
-                              ]
-                                  : [
-                                Colors.deepPurple,
-                                Colors.indigo,
-                                Colors.amber,
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ).createShader(bounds),
-                            child: Text(
-                              context.loc.awa,
-                              style: TextStyle(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                                letterSpacing: 1.6,
-                                shadows: [
-                                  Shadow(
-                                    color: Colors.black.withOpacity(0.15),
-                                    blurRadius: 2,
-                                    offset: Offset(1, 1),
+                      title: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return SizedBox(
+                            width: constraints.maxWidth,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: _isDarkMode
+                                        ? Colors.cyanAccent.withOpacity(0.13)
+                                        : Colors.white.withOpacity(0.19),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: _isDarkMode
+                                            ? Colors.cyanAccent.withOpacity(0.23)
+                                            : Colors.blueAccent.withOpacity(0.16),
+                                        blurRadius: 20,
+                                        spreadRadius: 3,
+                                        offset: Offset(0, 6),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (_isSubscribed || _trialSkip) ...[
-                            const SizedBox(width: 8),
-                            AnimatedContainer(
-                              duration: Duration(milliseconds: 900),
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Colors.amber.shade700,
-                                    Colors.amberAccent.shade200,
-                                    Colors.amber.shade400,
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.amber.withOpacity(0.21),
-                                    blurRadius: 14,
-                                    spreadRadius: 2,
+                                  child: Image.asset(
+                                    'assets/images/awa_logo.webp',
+                                    height: 32,
+                                    width: 32,
                                   ),
-                                ],
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.workspace_premium,
-                                      color: Colors.white, size: 12),
-                                  const SizedBox(width: 2),
-                                  ShaderMask(
-                                    shaderCallback: (bounds) => LinearGradient(
-                                      colors: [
-                                        Colors.white,
-                                        Colors.amberAccent,
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ).createShader(bounds),
-                                    child: Text(
-                                      context.loc.premium,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 1.1,
-                                        shadows: [
-                                          Shadow(
-                                            color: Colors.amberAccent
-                                                .withOpacity(0.36),
-                                            blurRadius: 5,
-                                            offset: Offset(1, 1),
-                                          ),
+                                ),
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: ShaderMask(
+                                      shaderCallback: (bounds) => LinearGradient(
+                                        colors: _isDarkMode
+                                            ? [
+                                          Colors.cyanAccent,
+                                          Colors.blueAccent,
+                                          Colors.white,
+                                        ]
+                                            : [
+                                          Colors.deepPurple,
+                                          Colors.indigo,
+                                          Colors.amber,
                                         ],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      ).createShader(bounds),
+                                      child: Text(
+                                        context.loc.awa,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.w900,
+                                          color: Colors.white,
+                                          letterSpacing: 1.6,
+                                          shadows: [
+                                            Shadow(
+                                              color: Colors.black.withOpacity(0.15),
+                                              blurRadius: 2,
+                                              offset: Offset(1, 1),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+                                if (_isSubscribed || _trialSkip) ...[
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: AnimatedContainer(
+                                        duration: Duration(milliseconds: 900),
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              Colors.amber.shade700,
+                                              Colors.amberAccent.shade200,
+                                              Colors.amber.shade400,
+                                            ],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                          ),
+                                          borderRadius: BorderRadius.circular(14),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.amber.withOpacity(0.21),
+                                              blurRadius: 14,
+                                              spreadRadius: 2,
+                                            ),
+                                          ],
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.workspace_premium,
+                                                color: Colors.white, size: 12),
+                                            const SizedBox(width: 2),
+                                            ShaderMask(
+                                              shaderCallback: (bounds) => LinearGradient(
+                                                colors: [
+                                                  Colors.white,
+                                                  Colors.amberAccent,
+                                                ],
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                              ).createShader(bounds),
+                                              child: Text(
+                                                context.loc.premium,
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  letterSpacing: 1.1,
+                                                  shadows: [
+                                                    Shadow(
+                                                      color: Colors.amberAccent
+                                                          .withOpacity(0.36),
+                                                      blurRadius: 5,
+                                                      offset: Offset(1, 1),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ]
+                              ],
                             ),
-                          ]
-                        ],
+                          );
+                        },
                       ),
                       actions: [
                         Padding(
