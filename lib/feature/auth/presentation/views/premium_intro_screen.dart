@@ -366,9 +366,12 @@ class _PremiumIntroScreenState extends State<PremiumIntroScreen>
       children: _plans.map((plan) {
         final isSelected = plan == _selectedPlan;
         final planLabel = plan['plan_name'] ?? 'Plan';
-        final price = plan['price'] != null
-            ? '₹${(plan['price'] as num).toStringAsFixed(0)}'
-            : '₹---';
+        final rawPrice = plan['price'];
+        final priceValue = rawPrice is num
+            ? rawPrice
+            : num.tryParse(rawPrice?.toString() ?? '');
+        final price =
+            priceValue != null ? '₹${priceValue.toStringAsFixed(0)}' : '₹---';
         final subtitle = plan['subtitle'] ?? (plan['duration_days'] != null
             ? "${plan['duration_days']} days"
             : null);

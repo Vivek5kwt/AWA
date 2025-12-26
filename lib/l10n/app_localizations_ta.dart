@@ -183,7 +183,7 @@ class AppLocalizationsTa extends AppLocalizations {
   String get goPremium => 'பிரீமியம் பெறவும்';
 
   @override
-  String get awa => 'ஏடபிள்யூஏ';
+  String get awa => 'Hearing Access';
 
   @override
   String get premium => 'பிரீமியம்';

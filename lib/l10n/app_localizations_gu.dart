@@ -183,7 +183,7 @@ class AppLocalizationsGu extends AppLocalizations {
   String get goPremium => 'પ્રીમિયમ લો';
 
   @override
-  String get awa => 'એડબ્લ્યુએ';
+  String get awa => 'Hearing Access';
 
   @override
   String get premium => 'પ્રીમિયમ';
