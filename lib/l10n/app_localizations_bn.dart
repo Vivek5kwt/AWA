@@ -183,7 +183,7 @@ class AppLocalizationsBn extends AppLocalizations {
   String get goPremium => 'প্রিমিয়াম নিন';
 
   @override
-  String get awa => 'এডব্লিউএ';
+  String get awa => 'Hearing Access';
 
   @override
   String get premium => 'প্রিমিয়াম';

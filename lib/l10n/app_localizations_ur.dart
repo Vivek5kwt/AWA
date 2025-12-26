@@ -183,7 +183,7 @@ class AppLocalizationsUr extends AppLocalizations {
   String get goPremium => 'پریمیم حاصل کریں';
 
   @override
-  String get awa => 'اے ڈبلیو اے';
+  String get awa => 'Hearing Access';
 
   @override
   String get premium => 'پریمیم';
